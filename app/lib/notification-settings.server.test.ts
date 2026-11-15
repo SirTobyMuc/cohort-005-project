@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { buyTeamLicence, createPurchase } from "./purchases.server";
@@ -19,6 +20,14 @@ beforeEach(() => {
   db = createTestDb();
   base = seedBaseData(db);
 });
+
+function addUser(name: string, role: schema.UserRole) {
+  return db
+    .insert(schema.users)
+    .values({ name, email: `${name.toLowerCase()}@example.com`, role })
+    .returning()
+    .get();
+}
 
 describe("visibleNotificationCategories", () => {
   it("shows only Discussion Replies to a Student with nothing", () => {
@@ -74,6 +83,52 @@ describe("visibleNotificationCategories", () => {
       .run();
 
     expect(visibleNotificationCategories(db, member.id)).toEqual([
+      "discussion_replies",
+    ]);
+  });
+
+  it("adds Seat claims only for the Team Licence's buyer, not another team admin", () => {
+    const { team } = buyTeamLicence(
+      db,
+      base.user.id,
+      base.course.id,
+      20000,
+      "US",
+      3,
+      NOW
+    );
+    const coAdmin = addUser("Co-admin", schema.UserRole.Student);
+    db.insert(schema.teamMembers)
+      .values({
+        teamId: team.id,
+        userId: coAdmin.id,
+        role: schema.TeamMemberRole.Admin,
+      })
+      .run();
+
+    expect(visibleNotificationCategories(db, coAdmin.id)).toEqual([
+      "discussion_replies",
+    ]);
+  });
+
+  it("adds Enrollments and Discussion Questions for whoever instructs a course, whatever their role", () => {
+    const owner = addUser("Owner", schema.UserRole.Student);
+    db.update(schema.courses)
+      .set({ instructorId: owner.id })
+      .where(eq(schema.courses.id, base.course.id))
+      .run();
+
+    expect(visibleNotificationCategories(db, owner.id)).toEqual([
+      "enrollments",
+      "discussion_questions",
+      "discussion_replies",
+    ]);
+  });
+
+  it("doesn't add them for an Instructor role with no course", () => {
+    const newInstructor = addUser("New", schema.UserRole.Instructor);
+
+    expect(visibleNotificationCategories(db, newInstructor.id)).toEqual([
       "discussion_replies",
     ]);
   });

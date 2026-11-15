@@ -1,12 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import {
-  coupons,
-  purchases,
-  teamMembers,
-  TeamMemberRole,
-  UserRole,
-  users,
-} from "~/db/schema";
+import { eq } from "drizzle-orm";
+import { coupons, courses, purchases, UserRole, users } from "~/db/schema";
 import { z } from "zod";
 import type { Db } from "~/lib/refunds.server";
 import {
@@ -27,13 +20,20 @@ export function visibleNotificationCategories(
   db: Db,
   userId: number
 ): NotificationCategory[] {
-  const role = db
-    .select({ role: users.role })
-    .from(users)
-    .where(eq(users.id, userId))
-    .get()?.role;
-  const isInstructor = role === UserRole.Instructor;
-  const isPlatformAdmin = role === UserRole.Admin;
+  // A Platform Admin is defined by role; everyone else by what they have.
+  const isPlatformAdmin =
+    db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .get()?.role === UserRole.Admin;
+
+  // The Instructor of at least one course, like Notifications 5 and 6 go to.
+  const isInstructor = !!db
+    .select({ id: courses.id })
+    .from(courses)
+    .where(eq(courses.instructorId, userId))
+    .get();
 
   const hasPurchase = !!db
     .select({ id: purchases.id })
@@ -41,23 +41,19 @@ export function visibleNotificationCategories(
     .where(eq(purchases.userId, userId))
     .get();
 
-  // Every Team Licence grants Seats, so a team with a Seat has a Team Licence.
-  const isTeamAdminOnLicence = !!db
+  // Notification 4 goes to whoever bought the Team Licence. A Team Licence is
+  // the Purchase that granted Seats.
+  const boughtTeamLicence = !!db
     .select({ id: coupons.id })
-    .from(teamMembers)
-    .innerJoin(coupons, eq(coupons.teamId, teamMembers.teamId))
-    .where(
-      and(
-        eq(teamMembers.userId, userId),
-        eq(teamMembers.role, TeamMemberRole.Admin)
-      )
-    )
+    .from(purchases)
+    .innerJoin(coupons, eq(coupons.purchaseId, purchases.id))
+    .where(eq(purchases.userId, userId))
     .get();
 
   const applies: Record<NotificationCategory, boolean> = {
     refund_request_updates: hasPurchase,
     open_refund_requests: isPlatformAdmin,
-    seat_claims: isTeamAdminOnLicence,
+    seat_claims: boughtTeamLicence,
     enrollments: isInstructor,
     discussion_questions: isInstructor,
     discussion_replies: true,
