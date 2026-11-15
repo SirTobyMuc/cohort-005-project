@@ -66,7 +66,8 @@ const preferenceSchema = z.object({
   enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
 });
 
-export type SavePreferenceResult = { ok: true } | { ok: false; error: string };
+export type SavePreferenceResult =
+  { ok: true } | { ok: false; status: 400 | 502; error: string };
 
 /**
  * Saves one switch from the Notifications card: the category's `feed` channel.
@@ -79,7 +80,11 @@ export async function saveNotificationPreference(
 ): Promise<SavePreferenceResult> {
   const parsed = parseFormData(formData, preferenceSchema);
   if (!parsed.success) {
-    return { ok: false, error: "That notification setting isn't valid." };
+    return {
+      ok: false,
+      status: 400,
+      error: "That notification setting isn't valid.",
+    };
   }
 
   const { category, enabled } = parsed.data;
@@ -89,6 +94,7 @@ export async function saveNotificationPreference(
     console.error("Failed to save notification preference", error);
     return {
       ok: false,
+      status: 502,
       error: "Couldn't save your notification settings. Try again.",
     };
   }

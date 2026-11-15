@@ -197,7 +197,7 @@ describe("saveNotificationPreference", () => {
       form({ category: "marketing", enabled: "false" })
     );
 
-    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ ok: false, status: 400 });
     expect(await notifications.getPreferences(base.user.id)).toEqual(
       await fakeNotifications().getPreferences(base.user.id)
     );
@@ -220,6 +220,7 @@ describe("saveNotificationPreference", () => {
 
     expect(result).toEqual({
       ok: false,
+      status: 502,
       error: "Couldn't save your notification settings. Try again.",
     });
     expect(errorSpy).toHaveBeenCalled();
