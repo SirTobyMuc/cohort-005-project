@@ -74,8 +74,9 @@ export async function createComment(
     throw new Error("Lesson not found");
   }
 
+  let parent: ReturnType<typeof getCommentById> = undefined;
   if (parentId !== null) {
-    const parent = getCommentById(db, parentId);
+    parent = getCommentById(db, parentId);
     if (!parent) {
       throw new Error("Parent comment not found");
     }
@@ -101,15 +102,25 @@ export async function createComment(
 
   // A Discussion Question goes to the Instructor, from anyone but them
   // (Platform Admins included).
-  if (parentId === null && userId !== course.instructorId) {
-    const sender = getUser(db, userId);
-    const instructor = getUser(db, course.instructorId);
+  if (!parent && userId !== course.instructorId) {
     await sendNotification(notifications, {
       kind: "discussion_question",
-      recipients: [toNotificationUser(instructor)],
-      sender: toNotificationUser(sender),
+      recipients: [toNotificationUser(getUser(db, course.instructorId))],
+      sender: toNotificationUser(getUser(db, userId)),
       data: discussionData(course, comment),
       idempotencyKey: `discussion-question:${comment.id}`,
+    });
+  }
+
+  // A Reply goes to the question's author only, unless they wrote it. There
+  // is no thread following: earlier repliers aren't told.
+  if (parent && userId !== parent.userId) {
+    await sendNotification(notifications, {
+      kind: "discussion_reply",
+      recipients: [toNotificationUser(getUser(db, parent.userId))],
+      sender: toNotificationUser(getUser(db, userId)),
+      data: discussionData(course, comment),
+      idempotencyKey: `discussion-reply:${comment.id}`,
     });
   }
 

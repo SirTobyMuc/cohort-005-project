@@ -347,4 +347,102 @@ describe("Discussion Notifications", () => {
 
     expect(notifications.triggers).toEqual([]);
   });
+
+  it("tells only the question's author about a Reply", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
+    const classmate = db
+      .insert(schema.users)
+      .values({
+        name: "Cleo Classmate",
+        email: "cleo@example.com",
+        role: schema.UserRole.Student,
+      })
+      .returning()
+      .get();
+    await createComment(
+      db,
+      classmate.id,
+      lessonId,
+      question.id,
+      "Me too!",
+      NOW,
+      notifications
+    );
+    notifications.triggers.length = 0;
+
+    const reply = await createComment(
+      db,
+      base.instructor.id,
+      lessonId,
+      question.id,
+      "Closures   capture\n\nvariables.",
+      NOW,
+      notifications
+    );
+
+    expect(notifications.triggers).toEqual([
+      {
+        kind: "discussion_reply",
+        recipients: [asNotificationUser(base.user)],
+        sender: asNotificationUser(base.instructor),
+        data: {
+          commentId: reply.id,
+          courseTitle: "Test Course",
+          lessonTitle: "Lesson 1",
+          snippet: "Closures capture variables.",
+          url: `/courses/test-course/lessons/${lessonId}#comment-${reply.id}`,
+        },
+        idempotencyKey: `discussion-reply:${reply.id}`,
+      },
+    ]);
+  });
+
+  it("tells nobody when the author Replies to their own question", async () => {
+    const question = await createComment(
+      db,
+      base.instructor.id,
+      lessonId,
+      null,
+      "Any questions?",
+      NOW,
+      notifications
+    );
+
+    await createComment(
+      db,
+      base.instructor.id,
+      lessonId,
+      question.id,
+      "Ask away.",
+      NOW,
+      notifications
+    );
+
+    expect(notifications.triggers).toEqual([]);
+  });
+
+  it("cuts a long comment to a snippet", async () => {
+    await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "word ".repeat(100),
+      NOW,
+      notifications
+    );
+
+    const [{ data }] = notifications.triggers;
+    expect(data).toMatchObject({
+      snippet: `${"word ".repeat(27)}word…`,
+    });
+  });
 });
