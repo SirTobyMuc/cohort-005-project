@@ -7,11 +7,14 @@ import {
   UserRole,
   users,
 } from "~/db/schema";
+import { z } from "zod";
 import type { Db } from "~/lib/refunds.server";
 import {
   NOTIFICATION_CATEGORIES,
   type NotificationCategory,
+  type NotificationUsers,
 } from "~/lib/notifications.server";
+import { parseFormData } from "~/lib/validation";
 
 // ─── Notification settings ───
 // What the Notifications card on /settings shows and saves.
@@ -60,4 +63,30 @@ export function visibleNotificationCategories(
     discussion_replies: true,
   };
   return NOTIFICATION_CATEGORIES.filter((category) => applies[category]);
+}
+
+const preferenceSchema = z.object({
+  category: z.enum(NOTIFICATION_CATEGORIES),
+  enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
+});
+
+export type SavePreferenceResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Saves one switch from the Notifications card: the category's `feed` channel.
+ * Every other category is left as it was.
+ */
+export async function saveNotificationPreference(
+  port: NotificationUsers,
+  userId: number,
+  formData: FormData
+): Promise<SavePreferenceResult> {
+  const parsed = parseFormData(formData, preferenceSchema);
+  if (!parsed.success) {
+    return { ok: false, error: "That notification setting isn't valid." };
+  }
+
+  const { category, enabled } = parsed.data;
+  await port.setPreference(userId, category, "feed", enabled);
+  return { ok: true };
 }

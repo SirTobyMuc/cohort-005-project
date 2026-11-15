@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { buyTeamLicence, createPurchase } from "./purchases.server";
-import { visibleNotificationCategories } from "./notification-settings.server";
+import { fakeNotifications } from "./notifications.server";
+import {
+  saveNotificationPreference,
+  visibleNotificationCategories,
+} from "./notification-settings.server";
 
 const NOW = new Date("2026-03-01T12:00:00Z");
 
@@ -97,5 +101,35 @@ describe("visibleNotificationCategories", () => {
       "open_refund_requests",
       "discussion_replies",
     ]);
+  });
+});
+
+describe("saveNotificationPreference", () => {
+  function form(fields: Record<string, string>) {
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(fields)) {
+      formData.set(key, value);
+    }
+    return formData;
+  }
+
+  it("flips one category's feed switch and leaves every other one alone", async () => {
+    const notifications = fakeNotifications();
+
+    const result = await saveNotificationPreference(
+      notifications,
+      base.user.id,
+      form({ category: "discussion_replies", enabled: "false" })
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(await notifications.getPreferences(base.user.id)).toEqual({
+      refund_request_updates: { feed: true },
+      open_refund_requests: { feed: true },
+      seat_claims: { feed: true },
+      enrollments: { feed: false },
+      discussion_questions: { feed: true },
+      discussion_replies: { feed: false },
+    });
   });
 });
