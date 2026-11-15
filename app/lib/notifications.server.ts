@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
-import Knock from "@knocklabs/node";
+import Knock, { signUserToken } from "@knocklabs/node";
 
 // ─── Notifications ───
 // The Cadence-owned port for sending Notifications (see GLOSSARY.md and #46).
@@ -191,6 +191,57 @@ export function defaultNotifications(
 ): Notifications {
   const secretApiKey = env.KNOCK_SECRET_API_KEY;
   return secretApiKey ? knockNotifications(secretApiKey) : noopNotifications();
+}
+
+// ─── Notification Feed ───
+// The browser reads its Notification Feed straight from the vendor, with a
+// token signed here for the session user only (enhanced security: a token for
+// one user can't read another user's feed). See app/lib/notification-feed.ts.
+
+/** What the client adapter needs to open one person's Notification Feed. */
+export type NotificationFeedConfig = {
+  publicApiKey: string;
+  feedChannelId: string;
+  userId: string;
+  userToken: string;
+};
+
+type KnockFeedEnv = {
+  KNOCK_PUBLIC_API_KEY?: string;
+  KNOCK_SIGNING_KEY?: string;
+  KNOCK_FEED_CHANNEL_ID?: string;
+};
+
+function readKnockFeedEnv(): KnockFeedEnv {
+  if (process.env.KNOCK_SIGNING_KEY) return process.env;
+  if (!existsSync(".env")) return {};
+  return parseEnv(readFileSync(".env", "utf8"));
+}
+
+/**
+ * Signs a user token (RS256, `sub` = the Cadence user id) and returns the feed
+ * config for that user, or null without Knock's client keys: the feed is then
+ * empty and nothing errors.
+ */
+export async function notificationFeedConfig(
+  cadenceUserId: number,
+  env: KnockFeedEnv = readKnockFeedEnv()
+): Promise<NotificationFeedConfig | null> {
+  const { KNOCK_PUBLIC_API_KEY, KNOCK_SIGNING_KEY, KNOCK_FEED_CHANNEL_ID } =
+    env;
+  if (!KNOCK_PUBLIC_API_KEY || !KNOCK_SIGNING_KEY || !KNOCK_FEED_CHANNEL_ID) {
+    return null;
+  }
+  const userId = String(cadenceUserId);
+  return {
+    publicApiKey: KNOCK_PUBLIC_API_KEY,
+    feedChannelId: KNOCK_FEED_CHANNEL_ID,
+    userId,
+    userToken: await signUserToken(userId, {
+      signingKey: KNOCK_SIGNING_KEY,
+      expiresInSeconds: 60 * 60,
+    }),
+  };
 }
 
 /** Records every trigger, for tests to check what was sent. */

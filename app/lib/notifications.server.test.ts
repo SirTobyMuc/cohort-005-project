@@ -1,6 +1,8 @@
+import { createVerify, generateKeyPairSync } from "node:crypto";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   defaultNotifications,
+  notificationFeedConfig,
   sendNotification,
   type NotificationTrigger,
 } from "./notifications.server";
@@ -48,5 +50,41 @@ describe("sendNotification", () => {
       sendNotification(broken, confirmation)
     ).resolves.toBeUndefined();
     expect(log).toHaveBeenCalled();
+  });
+});
+
+describe("notificationFeedConfig", () => {
+  it("gives no feed when Knock's client keys are missing", async () => {
+    expect(await notificationFeedConfig(42, {})).toBeNull();
+  });
+
+  it("signs an RS256 token for that user only", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+
+    const config = await notificationFeedConfig(42, {
+      KNOCK_PUBLIC_API_KEY: "pk_test_123",
+      KNOCK_SIGNING_KEY: privateKey
+        .export({ type: "pkcs8", format: "pem" })
+        .toString(),
+      KNOCK_FEED_CHANNEL_ID: "feed-channel",
+    });
+
+    expect(config).toMatchObject({
+      publicApiKey: "pk_test_123",
+      feedChannelId: "feed-channel",
+      userId: "42",
+    });
+    const [header, payload, signature] = (config?.userToken ?? "").split(".");
+    const decode = (part: string) =>
+      JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+    expect(decode(header).alg).toBe("RS256");
+    expect(decode(payload).sub).toBe("42");
+    expect(
+      createVerify("RSA-SHA256")
+        .update(`${header}.${payload}`)
+        .verify(publicKey, signature, "base64url")
+    ).toBe(true);
   });
 });
