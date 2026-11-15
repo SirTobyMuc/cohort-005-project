@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -693,5 +693,74 @@ describe("Refund Request Notifications", () => {
         idempotencyKey: `refund-declined:${id}`,
       },
     ]);
+  });
+
+  describe("when Notifications fail", () => {
+    const broken = {
+      async trigger() {
+        throw new Error("Knock is down");
+      },
+    };
+
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("still raises and approves, and still emails the buyer", async () => {
+      const purchase = buyForSelf(base.user.id);
+
+      const raised = await raiseRefundRequest(
+        db,
+        purchase.id,
+        base.user.id,
+        "Nope.",
+        NOW,
+        broken
+      );
+      if (!raised.ok) throw new Error(raised.error);
+      const approved = await approveRefundRequest(
+        db,
+        raised.refundRequestId,
+        platformAdmin.id,
+        null,
+        NOW,
+        broken
+      );
+
+      expect(raised.email.subject).toBe("Refund requested — Test Course");
+      expect(approved).toMatchObject({
+        ok: true,
+        email: { subject: "Refund approved — Test Course" },
+      });
+      expect(listRefundRequestsForBuyer(db, base.user.id)).toMatchObject([
+        { id: raised.refundRequestId, status: RefundStatus.Approved },
+      ]);
+    });
+
+    it("still declines, and still emails the buyer", async () => {
+      const purchase = buyForSelf(base.user.id);
+      const id = await raise(purchase.id, base.user.id);
+
+      const declined = await declineRefundRequest(
+        db,
+        id,
+        platformAdmin.id,
+        "Past half way.",
+        NOW,
+        broken
+      );
+
+      expect(declined).toMatchObject({
+        ok: true,
+        email: { subject: "Refund declined — Test Course" },
+      });
+      expect(listRefundRequestsForBuyer(db, base.user.id)).toMatchObject([
+        { id, status: RefundStatus.Declined },
+      ]);
+    });
   });
 });
