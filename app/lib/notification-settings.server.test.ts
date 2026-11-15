@@ -73,4 +73,29 @@ describe("visibleNotificationCategories", () => {
       "discussion_replies",
     ]);
   });
+
+  it("adds Enrollments and Discussion Questions for an Instructor", () => {
+    expect(visibleNotificationCategories(db, base.instructor.id)).toEqual([
+      "enrollments",
+      "discussion_questions",
+      "discussion_replies",
+    ]);
+  });
+
+  it("adds Open Refund Requests for a Platform Admin", () => {
+    const admin = db
+      .insert(schema.users)
+      .values({
+        name: "Admin",
+        email: "admin@example.com",
+        role: schema.UserRole.Admin,
+      })
+      .returning()
+      .get();
+
+    expect(visibleNotificationCategories(db, admin.id)).toEqual([
+      "open_refund_requests",
+      "discussion_replies",
+    ]);
+  });
 });
