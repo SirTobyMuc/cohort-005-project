@@ -34,6 +34,7 @@ import { calculatePppPrice, getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { parseFormData, parseParams } from "~/lib/validation";
 import { enrollUser, findEnrollment } from "~/lib/enrollments.server";
 import { buyTeamLicence, createPurchase } from "~/lib/purchases.server";
+import { defaultNotifications } from "~/lib/notifications.server";
 
 function getCourseBySlug(slug: string) {
   return db.select().from(courses).where(eq(courses.slug, slug)).get();
@@ -242,7 +243,13 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
     const now = new Date();
     createPurchase(db, currentUserId, course.id, pppPrice, country, now);
-    enrollUser(db, currentUserId, course.id, now);
+    await enrollUser(
+      db,
+      currentUserId,
+      course.id,
+      now,
+      defaultNotifications()
+    );
     throw redirect(`/courses/${slug}/welcome`);
   }
 
