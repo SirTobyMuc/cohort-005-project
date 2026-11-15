@@ -43,3 +43,29 @@ export async function signUp(
   await syncNotificationUser(notifications, toNotificationUser(user));
   return { user, created: true };
 }
+
+/** Saves a user's own profile from /settings. A name change is synced. */
+export async function updateProfile(
+  db: Db,
+  userId: number,
+  input: { name: string; bio: string | null },
+  notifications: Notifications
+): Promise<User> {
+  const before = getUser(db, userId);
+  const user = db
+    .update(users)
+    .set({ name: input.name, bio: input.bio || null })
+    .where(eq(users.id, userId))
+    .returning()
+    .get();
+  if (user.name !== before.name) {
+    await syncNotificationUser(notifications, toNotificationUser(user));
+  }
+  return user;
+}
+
+function getUser(db: Db, userId: number): User {
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!user) throw new Error("User not found.");
+  return user;
+}
