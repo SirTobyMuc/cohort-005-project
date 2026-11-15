@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createTestDb } from "~/test/setup";
-import { fakeNotifications } from "./notifications.server";
-import { adminUpdateUser, signUp, updateProfile } from "./users.server";
+import { createTestDb, seedBaseData } from "~/test/setup";
+import * as schema from "~/db/schema";
+import { fakeNotifications, toNotificationUser } from "./notifications.server";
+import {
+  adminUpdateUser,
+  signUp,
+  syncAllUsers,
+  updateProfile,
+} from "./users.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -123,6 +129,29 @@ describe("adminUpdateUser", () => {
       avatar: null,
     });
     expect(await notifications.getPreferences(user.id)).toEqual(DEFAULTS);
+  });
+});
+
+describe("syncAllUsers", () => {
+  it("syncs every existing user, keeping choices already made", async () => {
+    const base = seedBaseData(db);
+    await notifications.syncUser(toNotificationUser(base.user));
+    await notifications.setPreference(base.user.id, "enrollments", "feed", true);
+
+    const count = await syncAllUsers(db, notifications);
+
+    const everyone = db.select().from(schema.users).all();
+    expect(count).toBe(everyone.length);
+    expect(notifications.syncs.slice(1).map((u) => u.id)).toEqual(
+      everyone.map((u) => u.id)
+    );
+    expect(await notifications.getPreferences(base.instructor.id)).toEqual(
+      DEFAULTS
+    );
+    expect(await notifications.getPreferences(base.user.id)).toEqual({
+      ...DEFAULTS,
+      enrollments: { feed: true },
+    });
   });
 });
 

@@ -82,6 +82,22 @@ export async function adminUpdateUser(
   return user;
 }
 
+/**
+ * Syncs every user, in id order, for the seed and the one-off backfill.
+ * Defaults are only written for users who have none, so it is safe to re-run.
+ * Returns how many users it tried; a failed sync is logged and skipped.
+ */
+export async function syncAllUsers(
+  db: Db,
+  notifications: Notifications
+): Promise<number> {
+  const everyone = db.select().from(users).orderBy(users.id).all();
+  for (const user of everyone) {
+    await syncNotificationUser(notifications, toNotificationUser(user));
+  }
+  return everyone.length;
+}
+
 function getUser(db: Db, userId: number): User {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) throw new Error("User not found.");

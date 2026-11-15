@@ -365,6 +365,11 @@ function readKnockEnv(): KnockEnv {
   return parseEnv(readFileSync(".env", "utf8"));
 }
 
+/** Whether a Knock secret key is set, for scripts that skip work without it. */
+export function isKnockConfigured(env: KnockEnv = readKnockEnv()): boolean {
+  return Boolean(env.KNOCK_SECRET_API_KEY);
+}
+
 /** Knock when a secret key is set, otherwise the no-op adapter. */
 export function defaultNotifications(
   env: KnockEnv = readKnockEnv()

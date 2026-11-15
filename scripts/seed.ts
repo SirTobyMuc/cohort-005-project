@@ -14,6 +14,11 @@ import {
   QuestionType,
   TeamMemberRole,
 } from "../app/db/schema";
+import {
+  defaultNotifications,
+  isKnockConfigured,
+} from "../app/lib/notifications.server";
+import { syncAllUsers } from "../app/lib/users.server";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2810,6 +2815,18 @@ This course is still in draft while the cluster examples are rewritten against t
   }
 
   console.log(`Created ${watchEventRows.length} video watch events.`);
+
+  // ─── Notifications user sync ───
+  // Syncs the seeded users and their default preferences to Knock. Skipped
+  // without KNOCK_SECRET_API_KEY. Seeded ids are reused across reseeds, so a
+  // Knock user keeps any preferences a previous seed's user chose.
+
+  if (isKnockConfigured()) {
+    const synced = await syncAllUsers(db, defaultNotifications());
+    console.log(`Synced ${synced} users to Knock.`);
+  } else {
+    console.log("Skipped Knock user sync: no KNOCK_SECRET_API_KEY.");
+  }
 
   // ─── Summary ───
 
