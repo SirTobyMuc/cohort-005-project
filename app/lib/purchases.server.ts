@@ -30,7 +30,13 @@ export function createPurchase(
 ): Purchase {
   return db
     .insert(purchases)
-    .values({ userId, courseId, amountPaid, country, createdAt: now.toISOString() })
+    .values({
+      userId,
+      courseId,
+      amountPaid,
+      country,
+      createdAt: now.toISOString(),
+    })
     .returning()
     .get();
 }
@@ -52,7 +58,11 @@ function getTeamForAdmin(db: Queryable, userId: number): Team | undefined {
   return db.select().from(teams).where(eq(teams.id, membership.teamId)).get();
 }
 
-function getOrCreateTeamForUser(db: Queryable, userId: number, now: Date): Team {
+function getOrCreateTeamForUser(
+  db: Queryable,
+  userId: number,
+  now: Date
+): Team {
   const existingTeam = getTeamForAdmin(db, userId);
   if (existingTeam) return existingTeam;
 
@@ -112,8 +122,22 @@ export function buyTeamLicence(
   quantity: number,
   now: Date
 ): { purchase: Purchase; team: Team; seats: Seat[] } {
-  const purchase = createPurchase(db, userId, courseId, amountPaid, country, now);
+  const purchase = createPurchase(
+    db,
+    userId,
+    courseId,
+    amountPaid,
+    country,
+    now
+  );
   const team = getOrCreateTeamForUser(db, userId, now);
-  const seats = generateSeats(db, team.id, courseId, purchase.id, quantity, now);
+  const seats = generateSeats(
+    db,
+    team.id,
+    courseId,
+    purchase.id,
+    quantity,
+    now
+  );
   return { purchase, team, seats };
 }

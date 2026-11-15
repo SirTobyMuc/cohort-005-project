@@ -48,8 +48,24 @@ describe("buyTeamLicence", () => {
   });
 
   it("reuses the Team Admin's team for a second Team Licence", () => {
-    const first = buyTeamLicence(db, base.user.id, base.course.id, 7900, null, 1, NOW);
-    const second = buyTeamLicence(db, base.user.id, base.course.id, 7900, null, 1, NOW);
+    const first = buyTeamLicence(
+      db,
+      base.user.id,
+      base.course.id,
+      7900,
+      null,
+      1,
+      NOW
+    );
+    const second = buyTeamLicence(
+      db,
+      base.user.id,
+      base.course.id,
+      7900,
+      null,
+      1,
+      NOW
+    );
 
     expect(second.team.id).toBe(first.team.id);
     expect(db.select().from(schema.teams).all()).toHaveLength(1);
