@@ -40,7 +40,6 @@ describe("sendNotification", () => {
   it("logs a failed trigger instead of throwing", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const broken = {
-      ...fakeNotifications(),
       async trigger() {
         throw new Error("Knock is down");
       },

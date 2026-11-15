@@ -4,7 +4,7 @@ import type { Db } from "~/lib/refunds.server";
 import {
   syncNotificationUser,
   toNotificationUser,
-  type Notifications,
+  type NotificationUsers,
 } from "~/lib/notifications.server";
 
 // ─── Users ───
@@ -21,7 +21,7 @@ export type User = typeof users.$inferSelect;
 export async function signUp(
   db: Db,
   input: { name: string; email: string },
-  notifications: Notifications
+  notifications: NotificationUsers
 ): Promise<{ user: User; created: boolean }> {
   const existing = db
     .select()
@@ -49,7 +49,7 @@ export async function updateProfile(
   db: Db,
   userId: number,
   input: { name: string; bio: string | null },
-  notifications: Notifications
+  notifications: NotificationUsers
 ): Promise<User> {
   const before = getUser(db, userId);
   const user = db
@@ -69,7 +69,7 @@ export async function adminUpdateUser(
   db: Db,
   userId: number,
   input: { name: string; email: string },
-  notifications: Notifications
+  notifications: NotificationUsers
 ): Promise<User> {
   getUser(db, userId);
   const user = db
@@ -89,7 +89,7 @@ export async function adminUpdateUser(
  */
 export async function syncAllUsers(
   db: Db,
-  notifications: Notifications
+  notifications: NotificationUsers
 ): Promise<number> {
   const everyone = db.select().from(users).orderBy(users.id).all();
   for (const user of everyone) {

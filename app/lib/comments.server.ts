@@ -1,8 +1,16 @@
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { comments, courses, lessons, modules } from "~/db/schema";
+import { comments, courses, lessons, modules, users } from "~/db/schema";
 import { MIN_COMMENT_LENGTH, MAX_COMMENT_LENGTH } from "~/lib/comments";
+import {
+  archiveNotifications,
+  sendNotification,
+  type NotificationArchive,
+  toNotificationUser,
+  type DiscussionNotificationData,
+  type Notifications,
+} from "~/lib/notifications.server";
 
 // ─── Comments ───
 // Writing Discussion Questions and Replies, and soft-deleting them. Routes call
@@ -34,7 +42,13 @@ export function validateCommentBody(body: string) {
 
 function getCourseForLesson(db: Db, lessonId: number) {
   return db
-    .select({ courseId: courses.id, instructorId: courses.instructorId })
+    .select({
+      courseId: courses.id,
+      instructorId: courses.instructorId,
+      courseTitle: courses.title,
+      courseSlug: courses.slug,
+      lessonTitle: lessons.title,
+    })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
     .innerJoin(courses, eq(modules.courseId, courses.id))
@@ -46,13 +60,14 @@ function getCourseForLesson(db: Db, lessonId: number) {
  * Posts a Discussion Question (parentId null) or a Reply to one. Replies are
  * one level deep and must sit on the same lesson as their question.
  */
-export function createComment(
+export async function createComment(
   db: Db,
   userId: number,
   lessonId: number,
   parentId: number | null,
   body: string,
-  now: Date
+  now: Date,
+  notifications: Notifications
 ) {
   const trimmed = validateCommentBody(body);
 
@@ -61,8 +76,9 @@ export function createComment(
     throw new Error("Lesson not found");
   }
 
+  let parent: ReturnType<typeof getCommentById> = undefined;
   if (parentId !== null) {
-    const parent = getCommentById(db, parentId);
+    parent = getCommentById(db, parentId);
     if (!parent) {
       throw new Error("Parent comment not found");
     }
@@ -74,7 +90,7 @@ export function createComment(
     }
   }
 
-  return db
+  const comment = db
     .insert(comments)
     .values({
       userId,
@@ -85,19 +101,80 @@ export function createComment(
     })
     .returning()
     .get();
+
+  // A Discussion Question goes to the Instructor, from anyone but them
+  // (Platform Admins included).
+  if (!parent && userId !== course.instructorId) {
+    await sendNotification(notifications, {
+      kind: "discussion_question",
+      recipients: [toNotificationUser(getUser(db, course.instructorId))],
+      sender: toNotificationUser(getUser(db, userId)),
+      data: discussionData(course, comment),
+      idempotencyKey: `discussion-question:${comment.id}`,
+    });
+  }
+
+  // A Reply goes to the question's author only, unless they wrote it. There
+  // is no thread following: earlier repliers aren't told.
+  if (parent && userId !== parent.userId) {
+    await sendNotification(notifications, {
+      kind: "discussion_reply",
+      recipients: [toNotificationUser(getUser(db, parent.userId))],
+      sender: toNotificationUser(getUser(db, userId)),
+      data: discussionData(course, comment),
+      idempotencyKey: `discussion-reply:${comment.id}`,
+    });
+  }
+
+  return comment;
+}
+
+function getUser(db: Db, userId: number) {
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!user) {
+    throw new Error("User not found");
+  }
+  return user;
+}
+
+const SNIPPET_LENGTH = 140;
+
+/** The comment's text as posted, on one line and cut to a feed-row length. */
+function toSnippet(body: string) {
+  const oneLine = body.replace(/\s+/g, " ");
+  return oneLine.length > SNIPPET_LENGTH
+    ? `${oneLine.slice(0, SNIPPET_LENGTH - 1).trimEnd()}…`
+    : oneLine;
+}
+
+function discussionData(
+  course: { courseTitle: string; courseSlug: string; lessonTitle: string },
+  comment: { id: number; lessonId: number; body: string }
+): DiscussionNotificationData {
+  return {
+    commentId: comment.id,
+    courseTitle: course.courseTitle,
+    lessonTitle: course.lessonTitle,
+    snippet: toSnippet(comment.body),
+    url: `/courses/${course.courseSlug}/lessons/${comment.lessonId}#comment-${comment.id}`,
+  };
 }
 
 /**
  * Soft-deletes a comment by setting `deletedAt`. Authors may delete their own
  * comments; staff (the course's Instructor or a Platform Admin) may delete
  * anyone's. Deleting an already-deleted comment is a no-op that returns it.
+ *
+ * Archives the Notifications this comment caused, so they leave their
+ * recipients' feeds. Deleting a question leaves its Replies' Notifications.
  */
-export function deleteComment(
+export async function deleteComment(
   db: Db,
   commentId: number,
   userId: number,
   isStaff: boolean,
-  now: Date
+  now: Date,
+  notifications: NotificationArchive
 ) {
   const existing = getCommentById(db, commentId);
   if (!existing) {
@@ -110,10 +187,14 @@ export function deleteComment(
     return existing;
   }
 
-  return db
+  const deleted = db
     .update(comments)
     .set({ deletedAt: now.toISOString() })
     .where(eq(comments.id, commentId))
     .returning()
     .get();
+
+  await archiveNotifications(notifications, { commentId });
+
+  return deleted;
 }
