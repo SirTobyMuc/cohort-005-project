@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { fakeNotifications } from "~/lib/notifications.server";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -478,9 +479,9 @@ describe("Discussion Notifications", () => {
         notifications
       );
 
-      expect(
-        notifications.archived.map((t) => t.idempotencyKey)
-      ).toEqual([`discussion-reply:${reply.id}`]);
+      expect(notifications.archived.map((t) => t.idempotencyKey)).toEqual([
+        `discussion-reply:${reply.id}`,
+      ]);
     });
 
     it("archives a deleted question's Notification but not its Replies'", async () => {
@@ -512,9 +513,9 @@ describe("Discussion Notifications", () => {
         notifications
       );
 
-      expect(
-        notifications.archived.map((t) => t.idempotencyKey)
-      ).toEqual([`discussion-question:${question.id}`]);
+      expect(notifications.archived.map((t) => t.idempotencyKey)).toEqual([
+        `discussion-question:${question.id}`,
+      ]);
     });
   });
 
@@ -567,6 +568,28 @@ describe("Discussion Notifications", () => {
       expect(reply.parentId).toBe(question.id);
       expect(deleted.deletedAt).toBe(NOW.toISOString());
       expect(console.error).toHaveBeenCalledTimes(3);
+    });
+
+    it("still posts a Discussion Question when building its Notification fails", async () => {
+      // The Instructor's user row has gone, so looking them up throws.
+      db.$client.pragma("foreign_keys = OFF");
+      db.delete(schema.users)
+        .where(eq(schema.users.id, base.instructor.id))
+        .run();
+
+      const question = await createComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Q?",
+        NOW,
+        notifications
+      );
+
+      expect(question.body).toBe("Q?");
+      expect(notifications.triggers).toEqual([]);
+      expect(console.error).toHaveBeenCalled();
     });
   });
 });

@@ -114,7 +114,8 @@ export async function action({ request }: Route.ActionArgs) {
       currentUser.id,
       formData
     );
-    return result.ok ? result : data(result, { status: 400 });
+    if (!result.ok) throw data(result.error, { status: result.status });
+    return result;
   }
 
   const parsed = parseFormData(formData, settingsSchema);
@@ -132,6 +133,37 @@ export async function action({ request }: Route.ActionArgs) {
     defaultNotifications()
   );
   return { success: true };
+}
+
+/**
+ * A notification switch's failed save is thrown by the server action, like
+ * every failure. Caught here, before it reaches the error boundary, so the
+ * switch can snap back and show a toast instead of replacing the page.
+ */
+export async function clientAction({
+  request,
+  serverAction,
+}: Route.ClientActionArgs) {
+  const formData = await request.clone().formData();
+  if (formData.get("intent") !== NOTIFICATION_PREFERENCE_INTENT) {
+    return serverAction();
+  }
+  try {
+    return await serverAction();
+  } catch (error) {
+    // Only a failed save; anything else (e.g. no session) still throws.
+    const failedSave =
+      isRouteErrorResponse(error) &&
+      (error.status === 400 || error.status === 502);
+    if (!failedSave) throw error;
+    return {
+      ok: false as const,
+      error:
+        typeof error.data === "string"
+          ? error.data
+          : "Couldn't save your notification settings.",
+    };
+  }
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {

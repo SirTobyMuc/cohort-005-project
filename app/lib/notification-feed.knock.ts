@@ -1,56 +1,18 @@
-import Knock, { type FeedItem, type Recipient } from "@knocklabs/client";
-import type {
-  NotificationFeedConfig,
-  NotificationKind,
-} from "~/lib/notifications.server";
+import Knock, { type FeedItem } from "@knocklabs/client";
+import { toFeedNotification } from "~/lib/knock-workflows";
+import type { NotificationFeedConfig } from "~/lib/notifications.server";
 import type {
   FeedNotification,
   NotificationCounts,
   NotificationFeed,
 } from "~/lib/notification-feed";
 
-// The Knock adapter for the client port. The only browser code that knows
+// The Knock adapter for the client port. The only browser code that talks to
 // Knock. Loaded with a dynamic import, so it never runs on the server.
-// No automated tests (see #46): check it by hand against Knock Development.
+// Mapping feed items to Notifications (knock-workflows.ts) is tested; the
+// rest is checked by hand against Knock Development (see #46).
 
 const PAGE_SIZE = 20;
-
-// The reverse of KNOCK_WORKFLOW_KEYS in notifications.server.ts. A workflow
-// missing here is left out of the feed.
-const KINDS_BY_WORKFLOW_KEY: Partial<Record<string, NotificationKind>> = {
-  "refund-request-confirmation": "refund_request_confirmation",
-  "open-refund-request": "open_refund_request",
-  "refund-request-approved": "refund_request_approved",
-  "refund-request-declined": "refund_request_declined",
-  "discussion-question": "discussion_question",
-  "discussion-reply": "discussion_reply",
-};
-
-function toSender(actor: Recipient | undefined): FeedNotification["sender"] {
-  if (!actor || !("name" in actor) || typeof actor.name !== "string") {
-    return null;
-  }
-  return {
-    name: actor.name,
-    avatar: typeof actor.avatar === "string" ? actor.avatar : null,
-  };
-}
-
-function toFeedNotification(item: FeedItem): FeedNotification | null {
-  const kind = KINDS_BY_WORKFLOW_KEY[item.source.key];
-  if (!kind || !item.data) return null;
-  // Knock hands back the `data` the server port triggered this workflow with,
-  // so it has that kind's shape.
-  return {
-    kind,
-    data: item.data,
-    id: item.id,
-    sender: toSender(item.actors[0]),
-    insertedAt: item.inserted_at,
-    readAt: item.read_at,
-    seenAt: item.seen_at,
-  } as FeedNotification;
-}
 
 function toFeedNotifications(items: FeedItem[]): FeedNotification[] {
   return items.flatMap((item) => toFeedNotification(item) ?? []);

@@ -9,6 +9,7 @@ import {
   type NotificationArchive,
   toNotificationUser,
   type DiscussionNotificationData,
+  type NotificationTrigger,
   type Notifications,
 } from "~/lib/notifications.server";
 
@@ -102,31 +103,67 @@ export async function createComment(
     .returning()
     .get();
 
+  await notifyAboutComment(db, course, parent, comment, notifications);
+
+  return comment;
+}
+
+type CourseForLesson = NonNullable<ReturnType<typeof getCourseForLesson>>;
+type Comment = typeof comments.$inferSelect;
+
+/**
+ * Sends the Notification a new comment causes, if any. Best-effort from the
+ * first lookup on: the comment is already posted, so nothing here may fail it.
+ */
+async function notifyAboutComment(
+  db: Db,
+  course: CourseForLesson,
+  parent: Comment | undefined,
+  comment: Comment,
+  notifications: Notifications
+) {
+  let notification: NotificationTrigger | null;
+  try {
+    notification = commentNotification(db, course, parent, comment);
+  } catch (error) {
+    console.error(
+      `Notification for comment ${comment.id} couldn't be built:`,
+      error
+    );
+    return;
+  }
+  if (notification) await sendNotification(notifications, notification);
+}
+
+function commentNotification(
+  db: Db,
+  course: CourseForLesson,
+  parent: Comment | undefined,
+  comment: Comment
+): NotificationTrigger | null {
   // A Discussion Question goes to the Instructor, from anyone but them
   // (Platform Admins included).
-  if (!parent && userId !== course.instructorId) {
-    await sendNotification(notifications, {
+  if (!parent) {
+    if (comment.userId === course.instructorId) return null;
+    return {
       kind: "discussion_question",
       recipients: [toNotificationUser(getUser(db, course.instructorId))],
-      sender: toNotificationUser(getUser(db, userId)),
+      sender: toNotificationUser(getUser(db, comment.userId)),
       data: discussionData(course, comment),
       idempotencyKey: `discussion-question:${comment.id}`,
-    });
+    };
   }
 
   // A Reply goes to the question's author only, unless they wrote it. There
   // is no thread following: earlier repliers aren't told.
-  if (parent && userId !== parent.userId) {
-    await sendNotification(notifications, {
-      kind: "discussion_reply",
-      recipients: [toNotificationUser(getUser(db, parent.userId))],
-      sender: toNotificationUser(getUser(db, userId)),
-      data: discussionData(course, comment),
-      idempotencyKey: `discussion-reply:${comment.id}`,
-    });
-  }
-
-  return comment;
+  if (comment.userId === parent.userId) return null;
+  return {
+    kind: "discussion_reply",
+    recipients: [toNotificationUser(getUser(db, parent.userId))],
+    sender: toNotificationUser(getUser(db, comment.userId)),
+    data: discussionData(course, comment),
+    idempotencyKey: `discussion-reply:${comment.id}`,
+  };
 }
 
 function getUser(db: Db, userId: number) {

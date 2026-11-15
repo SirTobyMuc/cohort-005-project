@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
 import Knock, { NotFoundError, signUserToken } from "@knocklabs/node";
+import { z } from "zod";
+import { KNOCK_WORKFLOW_KEYS } from "~/lib/knock-workflows";
+import type { Notification } from "~/lib/notification-kinds";
 
 // ─── Notifications ───
 // The Cadence-owned port for sending Notifications (see GLOSSARY.md and #46).
@@ -8,7 +11,8 @@ import Knock, { NotFoundError, signUserToken } from "@knocklabs/node";
 // Notifications through it after their write commits.
 //
 // Three adapters, picked like the MailTransport in mailer.server.ts:
-// - knockNotifications: the real one. Only it knows Knock's workflow keys.
+// - knockNotifications: the real one. It and the feed's Knock adapter take
+//   Knock's workflow keys from knock-workflows.ts.
 // - fakeNotifications: records triggers in memory, for vitest.
 // - noopNotifications: logs only, for when KNOCK_SECRET_API_KEY is missing.
 
@@ -20,105 +24,11 @@ export type NotificationUser = {
   avatar: string | null;
 };
 
-/**
- * One Notification and what its feed row needs. Cadence writes the row's text
- * from `data`; `url` is where clicking the row goes, or null for nowhere.
- */
-export type Notification =
-  // 8: to the buyer, confirming their Refund Request is under review.
-  | {
-      kind: "refund_request_confirmation";
-      data: {
-        refundRequestId: number;
-        courseTitle: string;
-        amount: number;
-        url: null;
-      };
-    }
-  // 3: to every Platform Admin, when a buyer raises a Refund Request.
-  | {
-      kind: "open_refund_request";
-      data: {
-        refundRequestId: number;
-        courseTitle: string;
-        amount: number;
-        reason: string;
-        url: string;
-      };
-    }
-  // 1: to the buyer, when a Platform Admin approves their Refund Request.
-  | {
-      kind: "refund_request_approved";
-      data: {
-        refundRequestId: number;
-        purchaseId: number;
-        purchasedAt: string;
-        courseTitle: string;
-        amount: number;
-        decisionNote: string | null;
-        url: null;
-      };
-    }
-  // 2: to the buyer, when a Platform Admin declines their Refund Request.
-  // The row reminds them they can raise a new one.
-  | {
-      kind: "refund_request_declined";
-      data: {
-        refundRequestId: number;
-        purchaseId: number;
-        courseTitle: string;
-        amount: number;
-        decisionNote: string;
-        url: null;
-      };
-    }
-  // 4: to the Team Admin who owns the Team Licence, when a Student claims one
-  // of its Seats. `seatsLeft` is its Unclaimed Seats after this claim.
-  | {
-      kind: "seat_claimed";
-      data: {
-        seatId: number;
-        courseTitle: string;
-        seatsLeft: number;
-        url: string;
-      };
-    }
-  // 5: to the course's Instructor, when a Student gets an Enrollment (from an
-  // Individual Purchase or a Claimed Seat). Its category is off by default.
-  | {
-      kind: "new_enrollment";
-      data: {
-        enrollmentId: number;
-        courseTitle: string;
-        url: string;
-      };
-    }
-  // 6: to the course's Instructor, when someone else asks a Discussion
-  // Question.
-  | {
-      kind: "discussion_question";
-      data: DiscussionNotificationData;
-    }
-  // 7: to the question's author only, when someone else Replies to it.
-  | {
-      kind: "discussion_reply";
-      data: DiscussionNotificationData;
-    };
-
-/**
- * What Discussion Notifications carry. `commentId` is the comment that caused
- * the Notification. `snippet` is its text as posted, so later edits change
- * nothing. `url` is the lesson, scrolled to the comment.
- */
-export type DiscussionNotificationData = {
-  commentId: number;
-  courseTitle: string;
-  lessonTitle: string;
-  snippet: string;
-  url: string;
-};
-
-export type NotificationKind = Notification["kind"];
+export type {
+  DiscussionNotificationData,
+  Notification,
+  NotificationKind,
+} from "~/lib/notification-kinds";
 
 export type NotificationTrigger = Notification & {
   recipients: NotificationUser[];
@@ -279,26 +189,13 @@ export async function archiveNotifications(
 
 // ─── Adapters ───
 
-// Only this adapter knows Knock's keys. Each Notification is one workflow,
-// and the workflow carries its preference category (see knock/workflows on
-// the knock-workflows branch).
-const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
-  refund_request_confirmation: "refund-request-confirmation",
-  open_refund_request: "open-refund-request",
-  refund_request_approved: "refund-request-approved",
-  refund_request_declined: "refund-request-declined",
-  seat_claimed: "seat-claimed",
-  new_enrollment: "new-enrollment",
-  discussion_question: "discussion-question",
-  discussion_reply: "discussion-reply",
-};
-
 function toKnockUser(user: NotificationUser) {
   return {
     id: String(user.id),
     name: user.name,
     email: user.email,
-    ...(user.avatar ? { avatar: user.avatar } : {}),
+    // Null rather than left out, so a removed avatar is cleared in Knock.
+    avatar: user.avatar,
   };
 }
 
@@ -309,10 +206,41 @@ const KNOCK_CHANNEL_TYPES: Record<NotificationChannel, "in_app_feed"> = {
 };
 const KNOCK_PREFERENCE_SET = "default";
 
-type KnockCategorySetting =
-  | boolean
-  | { channel_types?: Partial<Record<string, unknown>> | null };
+const knockCategorySettingSchema = z.union([
+  z.boolean(),
+  z
+    .object({
+      channel_types: z.record(z.string(), z.unknown()).nullish(),
+    })
+    .passthrough(), // Other Knock fields are written back untouched.
+]);
+type KnockCategorySetting = z.infer<typeof knockCategorySettingSchema>;
 type KnockCategories = Record<string, KnockCategorySetting>;
+
+/**
+ * Knock's categories, checked one by one. A setting that doesn't fit is
+ * logged and left out.
+ */
+function parseKnockCategories(userId: number, raw: unknown): KnockCategories {
+  const categories = z.record(z.string(), z.unknown()).safeParse(raw ?? {});
+  if (!categories.success) {
+    console.error(`Knock preferences for user ${userId} left out:`, raw);
+    return {};
+  }
+  const parsed: KnockCategories = {};
+  for (const [key, value] of Object.entries(categories.data)) {
+    const setting = knockCategorySettingSchema.safeParse(value);
+    if (setting.success) {
+      parsed[key] = setting.data;
+    } else {
+      console.error(
+        `Knock preference ${key} for user ${userId} left out:`,
+        setting.error
+      );
+    }
+  }
+  return parsed;
+}
 
 function fromKnockCategories(
   categories: KnockCategories
@@ -365,7 +293,7 @@ export function knockNotifications(
         String(userId),
         KNOCK_PREFERENCE_SET
       );
-      const categories = (set.categories ?? {}) as KnockCategories;
+      const categories = parseKnockCategories(userId, set.categories);
       return Object.keys(categories).length > 0 ? categories : null;
     } catch (error) {
       if (error instanceof NotFoundError) return null;

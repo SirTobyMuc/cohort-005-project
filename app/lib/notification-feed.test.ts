@@ -30,7 +30,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "refund",
+      group: "refund",
       title: "We've received your Refund Request",
       snippet: "$79.00 for Test Course is under review.",
     });
@@ -51,7 +51,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "refund",
+      group: "refund",
       title: "Ana Buyer requested a $79.00 refund",
       snippet: "Test Course: “Bought the wrong course.”",
     });
@@ -78,7 +78,7 @@ describe("describeNotification", () => {
     });
 
     expect(describeNotification(approved("Sorry it wasn't a fit."))).toEqual({
-      category: "refund",
+      group: "refund",
       title: "Your Refund Request was approved",
       snippet: "$79.00 for Test Course: “Sorry it wasn't a fit.”",
     });
@@ -96,7 +96,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "refund",
+      group: "refund",
       title: "Your Refund Request was declined",
       snippet: "Test Course: “Over the Watch Limit.” You can ask again.",
     });
@@ -119,7 +119,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "discussion",
+      group: "discussion",
       title: "Ana Buyer asked a question on Narrowing",
       snippet: "“Why doesn't `in` narrow here?”",
     });
@@ -134,7 +134,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "discussion",
+      group: "discussion",
       title: "Ana Buyer replied to your question on Narrowing",
       snippet: "“Why doesn't `in` narrow here?”",
     });
@@ -154,7 +154,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "team",
+      group: "team",
       title: "Ana Buyer claimed a Seat on Test Course",
       snippet: "3 Seats left.",
     });
@@ -186,7 +186,7 @@ describe("describeNotification", () => {
     };
 
     expect(describeNotification(notification)).toEqual({
-      category: "enrollment",
+      group: "enrollment",
       title: "Ana Buyer enrolled on Test Course",
       snippet: "A new Student on your course.",
     });

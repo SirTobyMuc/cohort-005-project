@@ -11,7 +11,7 @@ import { findEnrollment } from "~/lib/enrollments.server";
 import { defaultNotifications } from "~/lib/notifications.server";
 import {
   getSeatByCode,
-  redeemCoupon,
+  claimSeat,
   SEAT_ON_HOLD,
   SEAT_REFUNDED,
 } from "~/lib/seats.server";
@@ -46,9 +46,9 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function loader({ params, request }: Route.LoaderArgs) {
   const { code } = parseParams(params, redeemParamsSchema);
 
-  const coupon = getSeatByCode(db, code);
-  if (!coupon) {
-    throw data("Coupon not found.", { status: 404 });
+  const seat = getSeatByCode(db, code);
+  if (!seat) {
+    throw data("Seat not found.", { status: 404 });
   }
 
   const currentUserId = await getCurrentUserId(request);
@@ -58,14 +58,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     );
   }
 
-  const course = getCourseById(coupon.courseId);
+  const course = getCourseById(seat.courseId);
   if (!course) {
     throw data("Course not found.", { status: 404 });
   }
 
-  const alreadyRedeemed = coupon.redeemedByUserId !== null;
-  const alreadyEnrolled = !!findEnrollment(db, currentUserId, coupon.courseId);
-  const availability = getSeatAvailability(db, coupon);
+  const alreadyRedeemed = seat.redeemedByUserId !== null;
+  const alreadyEnrolled = !!findEnrollment(db, currentUserId, seat.courseId);
+  const availability = getSeatAvailability(db, seat);
   const unavailableReason =
     availability === "on_hold"
       ? SEAT_ON_HOLD
@@ -80,7 +80,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     const purchase = db
       .select()
       .from(purchases)
-      .where(eq(purchases.id, coupon.purchaseId))
+      .where(eq(purchases.id, seat.purchaseId))
       .get();
     if (purchase?.country && purchase.country !== (userCountry ?? "")) {
       countryMismatch = true;
@@ -113,7 +113,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const userCountry = await resolveCountry(request);
-  const result = await redeemCoupon(
+  const result = await claimSeat(
     db,
     code,
     currentUserId,

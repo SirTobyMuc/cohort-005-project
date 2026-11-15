@@ -741,7 +741,7 @@ export async function approveRefundRequest(
     await sendNotification(notifications, {
       kind: "refund_request_approved",
       recipients: [toNotificationUser(found.buyer)],
-      sender: null,
+      sender: getDecider(db, platformAdminId),
       data: {
         refundRequestId,
         purchaseId: decided.purchase.id,
@@ -756,6 +756,16 @@ export async function approveRefundRequest(
   }
 
   return { ok: true, email: decided.email };
+}
+
+/** The deciding Platform Admin, as the sender of the buyer's Notification. */
+function getDecider(db: Queryable, platformAdminId: number) {
+  const decider = db
+    .select()
+    .from(users)
+    .where(eq(users.id, platformAdminId))
+    .get();
+  return decider ? toNotificationUser(decider) : null;
 }
 
 /** The buyer is whoever paid: the Team Admin, for a Team Licence. */
@@ -830,7 +840,7 @@ export async function declineRefundRequest(
     await sendNotification(notifications, {
       kind: "refund_request_declined",
       recipients: [toNotificationUser(found.buyer)],
-      sender: null,
+      sender: getDecider(db, platformAdminId),
       data: {
         refundRequestId,
         purchaseId: decided.purchase.id,

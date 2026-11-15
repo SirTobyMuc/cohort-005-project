@@ -1,4 +1,4 @@
-import type { Notification } from "~/lib/notifications.server";
+import type { Notification } from "~/lib/notification-kinds";
 import { formatPrice } from "~/lib/utils";
 
 // ─── Notification Feed (client port) ───
@@ -94,11 +94,12 @@ export function markLoadedSeen(
 // ─── Row text ───
 // Cadence writes each row from the Notification's data, not Knock templates.
 
-export type NotificationCategory =
+/** Which icon a row gets. Not a preference category (notifications.server.ts). */
+export type NotificationRowGroup =
   "discussion" | "refund" | "team" | "enrollment";
 
 export type NotificationRow = {
-  category: NotificationCategory;
+  group: NotificationRowGroup;
   title: string;
   /** One line: a snippet of what was said, or context. */
   snippet: string;
@@ -115,7 +116,7 @@ export function describeNotification(
     case "refund_request_confirmation": {
       const { amount, courseTitle } = notification.data;
       return {
-        category: "refund",
+        group: "refund",
         title: "We've received your Refund Request",
         snippet: `${formatPrice(amount)} for ${courseTitle} is under review.`,
       };
@@ -123,7 +124,7 @@ export function describeNotification(
     case "open_refund_request": {
       const { amount, courseTitle, reason } = notification.data;
       return {
-        category: "refund",
+        group: "refund",
         title: `${senderName(notification)} requested a ${formatPrice(amount)} refund`,
         snippet: `${courseTitle}: “${reason}”`,
       };
@@ -131,7 +132,7 @@ export function describeNotification(
     case "refund_request_approved": {
       const { amount, courseTitle, decisionNote } = notification.data;
       return {
-        category: "refund",
+        group: "refund",
         title: "Your Refund Request was approved",
         snippet: decisionNote
           ? `${formatPrice(amount)} for ${courseTitle}: “${decisionNote}”`
@@ -141,7 +142,7 @@ export function describeNotification(
     case "refund_request_declined": {
       const { courseTitle, decisionNote } = notification.data;
       return {
-        category: "refund",
+        group: "refund",
         title: "Your Refund Request was declined",
         snippet: `${courseTitle}: “${decisionNote}” You can ask again.`,
       };
@@ -149,7 +150,7 @@ export function describeNotification(
     case "discussion_question": {
       const { lessonTitle, snippet } = notification.data;
       return {
-        category: "discussion",
+        group: "discussion",
         title: `${senderName(notification)} asked a question on ${lessonTitle}`,
         snippet: `“${snippet}”`,
       };
@@ -157,7 +158,7 @@ export function describeNotification(
     case "discussion_reply": {
       const { lessonTitle, snippet } = notification.data;
       return {
-        category: "discussion",
+        group: "discussion",
         title: `${senderName(notification)} replied to your question on ${lessonTitle}`,
         snippet: `“${snippet}”`,
       };
@@ -165,7 +166,7 @@ export function describeNotification(
     case "seat_claimed": {
       const { courseTitle, seatsLeft } = notification.data;
       return {
-        category: "team",
+        group: "team",
         title: `${senderName(notification)} claimed a Seat on ${courseTitle}`,
         snippet:
           seatsLeft === 0
@@ -176,7 +177,7 @@ export function describeNotification(
     case "new_enrollment": {
       const { courseTitle } = notification.data;
       return {
-        category: "enrollment",
+        group: "enrollment",
         title: `${senderName(notification)} enrolled on ${courseTitle}`,
         snippet: "A new Student on your course.",
       };
@@ -184,7 +185,7 @@ export function describeNotification(
     // A kind added to the server port before it has row text here.
     default:
       return {
-        category: "discussion",
+        group: "discussion",
         title: "You have a new Notification",
         snippet: "",
       };
