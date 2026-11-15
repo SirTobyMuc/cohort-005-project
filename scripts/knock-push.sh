@@ -16,7 +16,7 @@ for category in $(jq -r '.categories[]?' knock/workflows/*/workflow.json | sort 
   echo "category $category ✓"
 done
 
-npx knock workflow push --all \
+npx --yes @knocklabs/cli@1.5.0 workflow push --all \
   --workflows-dir=knock/workflows \
   --environment=development \
   --commit -m "Sync Cadence workflows"
