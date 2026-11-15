@@ -12,6 +12,7 @@
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "request-logger": "tsx request-logger/proxy.ts",
+    "knock:push": "scripts/knock-push.sh",
     "typecheck": "react-router typegen && tsc",
     "test": "vitest run",
     "test:watch": "vitest",
