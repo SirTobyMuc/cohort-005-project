@@ -18,6 +18,11 @@ import {
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
 import {
+  sendNotification,
+  toNotificationUser,
+  type Notifications,
+} from "~/lib/notifications.server";
+import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
   REFUND_WINDOW_DAYS,
@@ -354,13 +359,14 @@ export type RaiseResult =
   | { ok: true; refundRequestId: number; kind: PurchaseKind; email: Email }
   | Failure;
 
-export function raiseRefundRequest(
+export async function raiseRefundRequest(
   db: Db,
   purchaseId: number,
   buyerId: number,
   reason: string,
-  now: Date
-): RaiseResult {
+  now: Date,
+  notifications: Notifications
+): Promise<RaiseResult> {
   const check = checkRefundRequest(db, purchaseId, buyerId, now);
   if (!check.ok) return check;
 
@@ -386,6 +392,19 @@ export function raiseRefundRequest(
     })
     .returning()
     .get();
+
+  await sendNotification(notifications, {
+    kind: "refund_request_confirmation",
+    recipients: [toNotificationUser(buyer)],
+    sender: null,
+    data: {
+      refundRequestId: refundRequest.id,
+      courseTitle: course.title,
+      amount: purchase.amountPaid,
+      url: null,
+    },
+    idempotencyKey: `refund-requested:${refundRequest.id}`,
+  });
 
   return {
     ok: true,
@@ -611,13 +630,14 @@ function findOpenRefundRequest(
  * - A Team Licence: its Unclaimed Seats can never be claimed. Refused if any
  *   Seat has been claimed (docs/adr/0003).
  */
-export function approveRefundRequest(
+export async function approveRefundRequest(
   db: Db,
   refundRequestId: number,
   platformAdminId: number,
   note: string | null,
-  now: Date
-): DecisionResult {
+  now: Date,
+  notifications: Notifications
+): Promise<DecisionResult> {
   return db.transaction((tx): DecisionResult => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
@@ -689,13 +709,14 @@ export function approveRefundRequest(
  * the buyer may raise a new Refund Request. The note is required: it is how
  * the buyer learns whether another request is worth raising.
  */
-export function declineRefundRequest(
+export async function declineRefundRequest(
   db: Db,
   refundRequestId: number,
   platformAdminId: number,
   note: string,
-  now: Date
-): DecisionResult {
+  now: Date,
+  notifications: Notifications
+): Promise<DecisionResult> {
   const trimmedNote = note.trim();
 
   if (trimmedNote.length === 0) {
