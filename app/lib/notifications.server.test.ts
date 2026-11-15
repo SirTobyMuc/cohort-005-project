@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   defaultNotifications,
+  fakeNotifications,
   sendNotification,
   type NotificationTrigger,
 } from "./notifications.server";
@@ -39,6 +40,7 @@ describe("sendNotification", () => {
   it("logs a failed trigger instead of throwing", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const broken = {
+      ...fakeNotifications(),
       async trigger() {
         throw new Error("Knock is down");
       },

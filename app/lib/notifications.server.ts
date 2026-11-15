@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
-import Knock from "@knocklabs/node";
+import Knock, { NotFoundError } from "@knocklabs/node";
 
 // ─── Notifications ───
 // The Cadence-owned port for sending Notifications (see GLOSSARY.md and #46).
@@ -85,6 +85,68 @@ export type NotificationTrigger = Notification & {
 
 export interface Notifications {
   trigger(notification: NotificationTrigger): Promise<void>;
+  /**
+   * Creates or updates the user, and writes the default preferences only if
+   * they have none yet. Existing choices are never overwritten.
+   */
+  syncUser(user: NotificationUser): Promise<void>;
+  /** The user's preferences, or the defaults if they have none yet. */
+  getPreferences(userId: number): Promise<NotificationPreferences>;
+  /** Sets one category × channel switch, leaving the others alone. */
+  setPreference(
+    userId: number,
+    category: NotificationCategory,
+    channel: NotificationChannel,
+    enabled: boolean
+  ): Promise<void>;
+}
+
+// ─── Preferences ───
+// Modelled as category × channel. Only the adapters know Knock's keys.
+
+export const NOTIFICATION_CATEGORIES = [
+  "refund_request_updates",
+  "open_refund_requests",
+  "seat_claims",
+  "enrollments",
+  "discussion_questions",
+  "discussion_replies",
+] as const;
+
+export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
+
+/** The only channel in v1 is the in-app feed. */
+export const NOTIFICATION_CHANNELS = ["feed"] as const;
+
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
+export type NotificationPreferences = Record<
+  NotificationCategory,
+  Record<NotificationChannel, boolean>
+>;
+
+/** Every category on, except Enrollments. */
+export function defaultPreferences(): NotificationPreferences {
+  return {
+    refund_request_updates: { feed: true },
+    open_refund_requests: { feed: true },
+    seat_claims: { feed: true },
+    enrollments: { feed: false },
+    discussion_questions: { feed: true },
+    discussion_replies: { feed: true },
+  };
+}
+
+function withPreference(
+  preferences: NotificationPreferences,
+  category: NotificationCategory,
+  channel: NotificationChannel,
+  enabled: boolean
+): NotificationPreferences {
+  return {
+    ...preferences,
+    [category]: { ...preferences[category], [channel]: enabled },
+  };
 }
 
 export function toNotificationUser(user: {
@@ -119,6 +181,21 @@ export async function sendNotification(
   }
 }
 
+/**
+ * Syncs one user, best-effort like sendNotification: a failure is logged and
+ * swallowed, so it never fails signup, a profile save or an admin edit.
+ */
+export async function syncNotificationUser(
+  notifications: Notifications,
+  user: NotificationUser
+): Promise<void> {
+  try {
+    await notifications.syncUser(user);
+  } catch (error) {
+    console.error(`Notification user sync for user ${user.id} failed:`, error);
+  }
+}
+
 // ─── Adapters ───
 
 // Only this adapter knows Knock's keys. Each Notification is one workflow,
@@ -140,8 +217,72 @@ function toKnockUser(user: NotificationUser) {
   };
 }
 
+// Cadence's category names are Knock's category keys (see the workflows on
+// the knock-workflows branch). Cadence's `feed` channel is Knock's in-app feed.
+const KNOCK_CHANNEL_TYPES: Record<NotificationChannel, "in_app_feed"> = {
+  feed: "in_app_feed",
+};
+const KNOCK_PREFERENCE_SET = "default";
+
+type KnockCategorySetting =
+  | boolean
+  | { channel_types?: Partial<Record<string, unknown>> | null };
+type KnockCategories = Record<string, KnockCategorySetting>;
+
+function fromKnockCategories(
+  categories: KnockCategories
+): NotificationPreferences {
+  let preferences = defaultPreferences();
+  for (const category of NOTIFICATION_CATEGORIES) {
+    const setting = categories[category];
+    if (setting === undefined) continue;
+    for (const channel of NOTIFICATION_CHANNELS) {
+      const value =
+        typeof setting === "boolean"
+          ? setting
+          : setting.channel_types?.[KNOCK_CHANNEL_TYPES[channel]];
+      if (typeof value === "boolean") {
+        preferences = withPreference(preferences, category, channel, value);
+      }
+    }
+  }
+  return preferences;
+}
+
+function toKnockCategories(preferences: NotificationPreferences) {
+  return Object.fromEntries(
+    NOTIFICATION_CATEGORIES.map((category) => [
+      category,
+      {
+        channel_types: Object.fromEntries(
+          NOTIFICATION_CHANNELS.map((channel) => [
+            KNOCK_CHANNEL_TYPES[channel],
+            preferences[category][channel],
+          ])
+        ),
+      },
+    ])
+  );
+}
+
 export function knockNotifications(secretApiKey: string): Notifications {
   const knock = new Knock({ apiKey: secretApiKey });
+
+  /** The user's own Knock categories, or null if they have none yet. */
+  async function readCategories(userId: number) {
+    try {
+      const set = await knock.users.getPreferences(
+        String(userId),
+        KNOCK_PREFERENCE_SET
+      );
+      const categories = (set.categories ?? {}) as KnockCategories;
+      return Object.keys(categories).length > 0 ? categories : null;
+    } catch (error) {
+      if (error instanceof NotFoundError) return null;
+      throw error;
+    }
+  }
+
   return {
     async trigger(notification) {
       const workflowKey = KNOCK_WORKFLOW_KEYS[notification.kind];
@@ -157,6 +298,32 @@ export function knockNotifications(secretApiKey: string): Notifications {
         { idempotencyKey: `${workflowKey}:${notification.idempotencyKey}` }
       );
     },
+    async syncUser(user) {
+      const { id, ...properties } = toKnockUser(user);
+      await knock.users.update(id, properties);
+      if ((await readCategories(user.id)) === null) {
+        await knock.users.setPreferences(id, KNOCK_PREFERENCE_SET, {
+          categories: toKnockCategories(defaultPreferences()),
+        });
+      }
+    },
+    async getPreferences(userId) {
+      return fromKnockCategories((await readCategories(userId)) ?? {});
+    },
+    async setPreference(userId, category, channel, enabled) {
+      // Knock's setPreferences replaces the whole set, so read, merge one
+      // switch and write it all back. Unknown Knock categories are kept.
+      const existing = (await readCategories(userId)) ?? {};
+      const merged = withPreference(
+        fromKnockCategories(existing),
+        category,
+        channel,
+        enabled
+      );
+      await knock.users.setPreferences(String(userId), KNOCK_PREFERENCE_SET, {
+        categories: { ...existing, ...toKnockCategories(merged) },
+      });
+    },
   };
 }
 
@@ -170,6 +337,19 @@ export function noopNotifications(): Notifications {
           .join(
             ", "
           )} (${notification.idempotencyKey}) not sent: no KNOCK_SECRET_API_KEY`
+      );
+    },
+    async syncUser(user) {
+      console.info(
+        `[notifications] user ${user.id} not synced: no KNOCK_SECRET_API_KEY`
+      );
+    },
+    async getPreferences() {
+      return defaultPreferences();
+    },
+    async setPreference(userId, category, channel, enabled) {
+      console.info(
+        `[notifications] ${category}/${channel}=${enabled} for user ${userId} not saved: no KNOCK_SECRET_API_KEY`
       );
     },
   };
@@ -193,15 +373,38 @@ export function defaultNotifications(
   return secretApiKey ? knockNotifications(secretApiKey) : noopNotifications();
 }
 
-/** Records every trigger, for tests to check what was sent. */
+/**
+ * Records every trigger and sync, and keeps preferences in memory, for tests
+ * to check what was sent.
+ */
 export function fakeNotifications(): Notifications & {
   triggers: NotificationTrigger[];
+  syncs: NotificationUser[];
 } {
   const triggers: NotificationTrigger[] = [];
+  const syncs: NotificationUser[] = [];
+  const preferences = new Map<number, NotificationPreferences>();
   return {
     triggers,
+    syncs,
     async trigger(notification) {
       triggers.push(notification);
+    },
+    async syncUser(user) {
+      syncs.push(user);
+      if (!preferences.has(user.id)) {
+        preferences.set(user.id, defaultPreferences());
+      }
+    },
+    async getPreferences(userId) {
+      return preferences.get(userId) ?? defaultPreferences();
+    },
+    async setPreference(userId, category, channel, enabled) {
+      const current = preferences.get(userId) ?? defaultPreferences();
+      preferences.set(
+        userId,
+        withPreference(current, category, channel, enabled)
+      );
     },
   };
 }

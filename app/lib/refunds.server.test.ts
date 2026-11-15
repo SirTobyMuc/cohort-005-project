@@ -697,6 +697,7 @@ describe("Refund Request Notifications", () => {
 
   describe("when Notifications fail", () => {
     const broken = {
+      ...fakeNotifications(),
       async trigger() {
         throw new Error("Knock is down");
       },
