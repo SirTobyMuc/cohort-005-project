@@ -8,6 +8,7 @@ import { resolveCountry } from "~/lib/country.server";
 import { parseParams, parseFormData } from "~/lib/validation";
 import { getSeatAvailability } from "~/lib/refunds.server";
 import { findEnrollment } from "~/lib/enrollments.server";
+import { defaultNotifications } from "~/lib/notifications.server";
 import {
   getSeatByCode,
   redeemCoupon,
@@ -112,12 +113,13 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const userCountry = await resolveCountry(request);
-  const result = redeemCoupon(
+  const result = await redeemCoupon(
     db,
     code,
     currentUserId,
     userCountry ?? "",
-    new Date()
+    new Date(),
+    defaultNotifications()
   );
 
   if (!result.ok) {

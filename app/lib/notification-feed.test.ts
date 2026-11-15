@@ -139,6 +139,58 @@ describe("describeNotification", () => {
       snippet: "“Why doesn't `in` narrow here?”",
     });
   });
+
+  it("tells a Team Admin who claimed a Seat and how many are left", () => {
+    const notification: FeedNotification = {
+      ...received,
+      sender: ana,
+      kind: "seat_claimed",
+      data: {
+        seatId: 4,
+        courseTitle: "Test Course",
+        seatsLeft: 3,
+        url: "/team",
+      },
+    };
+
+    expect(describeNotification(notification)).toEqual({
+      category: "team",
+      title: "Ana Buyer claimed a Seat on Test Course",
+      snippet: "3 Seats left.",
+    });
+  });
+
+  it("says when a Team Licence has one Seat left, or none", () => {
+    const seat = { seatId: 4, courseTitle: "Test Course", url: "/team" };
+    const row = (seatsLeft: number) =>
+      describeNotification({
+        ...received,
+        sender: ana,
+        kind: "seat_claimed",
+        data: { ...seat, seatsLeft },
+      }).snippet;
+
+    expect([row(1), row(0)]).toEqual(["1 Seat left.", "No Seats left."]);
+  });
+
+  it("tells an Instructor who enrolled on their course", () => {
+    const notification: FeedNotification = {
+      ...received,
+      sender: ana,
+      kind: "new_enrollment",
+      data: {
+        enrollmentId: 9,
+        courseTitle: "Test Course",
+        url: "/instructor/1/students",
+      },
+    };
+
+    expect(describeNotification(notification)).toEqual({
+      category: "enrollment",
+      title: "Ana Buyer enrolled on Test Course",
+      snippet: "A new Student on your course.",
+    });
+  });
 });
 
 describe("marking loaded Notifications", () => {

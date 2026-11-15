@@ -72,6 +72,27 @@ export type Notification =
         url: null;
       };
     }
+  // 4: to the Team Admin who owns the Team Licence, when a Student claims one
+  // of its Seats. `seatsLeft` is its Unclaimed Seats after this claim.
+  | {
+      kind: "seat_claimed";
+      data: {
+        seatId: number;
+        courseTitle: string;
+        seatsLeft: number;
+        url: string;
+      };
+    }
+  // 5: to the course's Instructor, when a Student gets an Enrollment (from an
+  // Individual Purchase or a Claimed Seat). Its category is off by default.
+  | {
+      kind: "new_enrollment";
+      data: {
+        enrollmentId: number;
+        courseTitle: string;
+        url: string;
+      };
+    }
   // 6: to the course's Instructor, when someone else asks a Discussion
   // Question.
   | {
@@ -266,6 +287,8 @@ const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
   open_refund_request: "open-refund-request",
   refund_request_approved: "refund-request-approved",
   refund_request_declined: "refund-request-declined",
+  seat_claimed: "seat-claimed",
+  new_enrollment: "new-enrollment",
   discussion_question: "discussion-question",
   discussion_reply: "discussion-reply",
 };

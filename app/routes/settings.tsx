@@ -18,7 +18,18 @@ import { eq } from "drizzle-orm";
 import { formatPrice } from "~/lib/utils";
 import { listRefundRequestsForBuyer } from "~/lib/refunds.server";
 import { updateProfile } from "~/lib/users.server";
-import { defaultNotifications } from "~/lib/notifications.server";
+import {
+  defaultNotifications,
+  type NotificationCategory,
+  type NotificationPreferences,
+} from "~/lib/notifications.server";
+import {
+  saveNotificationPreference,
+  visibleNotificationCategories,
+} from "~/lib/notification-settings.server";
+import { Switch } from "~/components/ui/switch";
+
+const NOTIFICATION_PREFERENCE_INTENT = "notification-preference";
 
 const settingsSchema = z.object({
   name: z.string().trim().min(1, "Name cannot be empty."),
@@ -53,7 +64,21 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const refundRequests = listRefundRequestsForBuyer(db, currentUserId);
 
+  const categories = visibleNotificationCategories(db, currentUserId);
+  let preferences: NotificationPreferences | null = null;
+  try {
+    preferences = await defaultNotifications().getPreferences(currentUserId);
+  } catch (error) {
+    console.error("Failed to load notification preferences", error);
+  }
+
   return {
+    notifications: preferences && {
+      switches: categories.map((category) => ({
+        category,
+        enabled: preferences[category].feed,
+      })),
+    },
     user: {
       id: currentUser.id,
       name: currentUser.name,
@@ -82,6 +107,16 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const formData = await request.formData();
+
+  if (formData.get("intent") === NOTIFICATION_PREFERENCE_INTENT) {
+    const result = await saveNotificationPreference(
+      defaultNotifications(),
+      currentUser.id,
+      formData
+    );
+    return result.ok ? result : data(result, { status: 400 });
+  }
+
   const parsed = parseFormData(formData, settingsSchema);
 
   if (!parsed.success) {
@@ -100,7 +135,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { user, refundRequests } = loaderData;
+  const { user, refundRequests, notifications } = loaderData;
   const openCount = refundRequests.filter(
     (refundRequest) => refundRequest.status === RefundStatus.Open
   ).length;
@@ -190,6 +225,30 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
+      <Card className="mt-8 max-w-md">
+        <CardHeader>
+          <h2 className="text-lg font-semibold">Notifications</h2>
+          <p className="text-sm text-muted-foreground">
+            Choose what shows up in your notification feed.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {notifications ? (
+            notifications.switches.map(({ category, enabled }) => (
+              <NotificationSwitch
+                key={category}
+                category={category}
+                enabled={enabled}
+              />
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Your notification settings couldn't be loaded. Try again later.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {refundRequests.length > 0 && (
         <Card className="mt-8 max-w-md">
           <CardHeader>
@@ -237,6 +296,86 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+const NOTIFICATION_SWITCHES: Record<
+  NotificationCategory,
+  { label: string; description: string }
+> = {
+  refund_request_updates: {
+    label: "Refund Request updates",
+    description: "When we receive or decide one of your refund requests.",
+  },
+  open_refund_requests: {
+    label: "Open Refund Requests",
+    description: "When someone raises a refund request for review.",
+  },
+  seat_claims: {
+    label: "Seat claims",
+    description: "When someone claims a seat on your team licence.",
+  },
+  enrollments: {
+    label: "Enrollments",
+    description: "When a student enrolls in one of your courses.",
+  },
+  discussion_questions: {
+    label: "Discussion Questions",
+    description: "When a student asks a question on one of your lessons.",
+  },
+  discussion_replies: {
+    label: "Discussion Replies",
+    description: "When someone replies to you in a discussion.",
+  },
+};
+
+/**
+ * One category's feed switch. Saves on every flip and moves optimistically;
+ * a failed save snaps back to the stored value and shows a toast.
+ */
+function NotificationSwitch({
+  category,
+  enabled,
+}: {
+  category: NotificationCategory;
+  enabled: boolean;
+}) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const { label, description } = NOTIFICATION_SWITCHES[category];
+  const id = `notification-${category}`;
+
+  const pending = fetcher.formData?.get("enabled");
+  const checked = pending != null ? pending === "true" : enabled;
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.ok) {
+      toast.error(
+        fetcher.data.error ?? "Couldn't save your notification settings."
+      );
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="space-y-1">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={(next) =>
+          fetcher.submit(
+            {
+              intent: NOTIFICATION_PREFERENCE_INTENT,
+              category,
+              enabled: String(next),
+            },
+            { method: "post" }
+          )
+        }
+      />
     </div>
   );
 }
