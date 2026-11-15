@@ -544,4 +544,50 @@ describe("Refund Request Notifications", () => {
       },
     ]);
   });
+
+  it("tells every Platform Admin, and nobody else, about a new Open Refund Request", async () => {
+    const secondAdmin = db
+      .insert(schema.users)
+      .values({ name: "Sam Admin", email: "sam@example.com", role: UserRole.Admin })
+      .returning()
+      .get();
+    addLearner("Ben");
+    const purchase = buyForSelf(base.user.id);
+
+    const id = await raise(purchase.id, base.user.id);
+
+    expect(sent("open_refund_request")).toEqual([
+      {
+        kind: "open_refund_request",
+        recipients: [
+          {
+            id: platformAdmin.id,
+            name: "Pat Admin",
+            email: "pat@example.com",
+            avatar: null,
+          },
+          {
+            id: secondAdmin.id,
+            name: "Sam Admin",
+            email: "sam@example.com",
+            avatar: null,
+          },
+        ],
+        sender: {
+          id: base.user.id,
+          name: "Test User",
+          email: "test@example.com",
+          avatar: null,
+        },
+        data: {
+          refundRequestId: id,
+          courseTitle: "Test Course",
+          amount: 7900,
+          reason: "It was not what I expected.",
+          url: "/admin/refunds",
+        },
+        idempotencyKey: `refund-requested:${id}`,
+      },
+    ]);
+  });
 });

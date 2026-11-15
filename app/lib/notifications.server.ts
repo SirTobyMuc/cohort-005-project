@@ -24,15 +24,28 @@ export type NotificationUser = {
  * One Notification and what its feed row needs. Cadence writes the row's text
  * from `data`; `url` is where clicking the row goes, or null for nowhere.
  */
-export type Notification = {
-  kind: "refund_request_confirmation";
-  data: {
-    refundRequestId: number;
-    courseTitle: string;
-    amount: number;
-    url: null;
-  };
-};
+export type Notification =
+  // 8: to the buyer, confirming their Refund Request is under review.
+  | {
+      kind: "refund_request_confirmation";
+      data: {
+        refundRequestId: number;
+        courseTitle: string;
+        amount: number;
+        url: null;
+      };
+    }
+  // 3: to every Platform Admin, when a buyer raises a Refund Request.
+  | {
+      kind: "open_refund_request";
+      data: {
+        refundRequestId: number;
+        courseTitle: string;
+        amount: number;
+        reason: string;
+        url: string;
+      };
+    };
 
 export type NotificationKind = Notification["kind"];
 
@@ -87,6 +100,7 @@ export async function sendNotification(
 // the knock-workflows branch).
 const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
   refund_request_confirmation: "refund-request-confirmation",
+  open_refund_request: "open-refund-request",
 };
 
 function toKnockUser(user: NotificationUser) {

@@ -15,6 +15,7 @@ import {
   videoWatchEvents,
   LessonProgressStatus,
   RefundStatus,
+  UserRole,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
 import {
@@ -405,6 +406,32 @@ export async function raiseRefundRequest(
     },
     idempotencyKey: `refund-requested:${refundRequest.id}`,
   });
+
+  // Every Platform Admin as of now: someone promoted later doesn't get the
+  // Notifications raised before. A buyer is never told about their own action.
+  const platformAdmins = db
+    .select()
+    .from(users)
+    .where(eq(users.role, UserRole.Admin))
+    .orderBy(asc(users.id))
+    .all()
+    .filter((admin) => admin.id !== buyer.id);
+
+  if (platformAdmins.length > 0) {
+    await sendNotification(notifications, {
+      kind: "open_refund_request",
+      recipients: platformAdmins.map(toNotificationUser),
+      sender: toNotificationUser(buyer),
+      data: {
+        refundRequestId: refundRequest.id,
+        courseTitle: course.title,
+        amount: purchase.amountPaid,
+        reason,
+        url: "/admin/refunds",
+      },
+      idempotencyKey: `refund-requested:${refundRequest.id}`,
+    });
+  }
 
   return {
     ok: true,
