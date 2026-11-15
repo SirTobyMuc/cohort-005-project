@@ -136,6 +136,25 @@ export function describeNotification(
         snippet: `“${snippet}”`,
       };
     }
+    case "seat_claimed": {
+      const { courseTitle, seatsLeft } = notification.data;
+      return {
+        category: "team",
+        title: `${senderName(notification)} claimed a Seat on ${courseTitle}`,
+        snippet:
+          seatsLeft === 0
+            ? "No Seats left."
+            : `${seatsLeft} Seat${seatsLeft === 1 ? "" : "s"} left.`,
+      };
+    }
+    case "new_enrollment": {
+      const { courseTitle } = notification.data;
+      return {
+        category: "enrollment",
+        title: `${senderName(notification)} enrolled on ${courseTitle}`,
+        snippet: "A new Student on your course.",
+      };
+    }
     // A kind added to the server port before it has row text here.
     default:
       return {
