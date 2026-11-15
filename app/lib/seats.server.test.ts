@@ -4,7 +4,7 @@ import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import { buyTeamLicence } from "./purchases.server";
 import { enrollUser } from "./enrollments.server";
-import { redeemCoupon } from "./seats.server";
+import { claimSeat } from "./seats.server";
 import { fakeNotifications } from "./notifications.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
@@ -40,10 +40,10 @@ function buyLicence(country: string | null = "US") {
 }
 
 function claim(code: string, userId: number, country = "US") {
-  return redeemCoupon(db, code, userId, country, NOW, notifications);
+  return claimSeat(db, code, userId, country, NOW, notifications);
 }
 
-describe("redeemCoupon", () => {
+describe("claimSeat", () => {
   it("claims the Seat and enrolls the Student", async () => {
     const { seats } = buyLicence();
 
@@ -75,7 +75,7 @@ describe("redeemCoupon", () => {
 
     expect(await claim(seats[0].code, base.user.id, "US")).toEqual({
       ok: false,
-      error: "Coupon has already been redeemed",
+      error: "This Seat has already been claimed",
     });
   });
 
@@ -103,7 +103,7 @@ describe("redeemCoupon", () => {
   it("refuses an unknown code", async () => {
     expect(await claim("nope", student.id, "US")).toEqual({
       ok: false,
-      error: "Coupon not found",
+      error: "Seat not found",
     });
   });
 });
@@ -186,18 +186,11 @@ describe("Seat claimed Notification", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const { seats } = buyLicence();
 
-    const result = await redeemCoupon(
-      db,
-      seats[0].code,
-      student.id,
-      "US",
-      NOW,
-      {
-        async trigger() {
-          throw new Error("down");
-        },
-      }
-    );
+    const result = await claimSeat(db, seats[0].code, student.id, "US", NOW, {
+      async trigger() {
+        throw new Error("down");
+      },
+    });
 
     expect(result).toMatchObject({ ok: true });
     expect(db.select().from(schema.enrollments).all()).toHaveLength(1);
