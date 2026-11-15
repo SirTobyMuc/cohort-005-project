@@ -15,8 +15,14 @@ import {
   videoWatchEvents,
   LessonProgressStatus,
   RefundStatus,
+  UserRole,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
+import {
+  sendNotification,
+  toNotificationUser,
+  type Notifications,
+} from "~/lib/notifications.server";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
@@ -354,13 +360,14 @@ export type RaiseResult =
   | { ok: true; refundRequestId: number; kind: PurchaseKind; email: Email }
   | Failure;
 
-export function raiseRefundRequest(
+export async function raiseRefundRequest(
   db: Db,
   purchaseId: number,
   buyerId: number,
   reason: string,
-  now: Date
-): RaiseResult {
+  now: Date,
+  notifications: Notifications
+): Promise<RaiseResult> {
   const check = checkRefundRequest(db, purchaseId, buyerId, now);
   if (!check.ok) return check;
 
@@ -386,6 +393,45 @@ export function raiseRefundRequest(
     })
     .returning()
     .get();
+
+  await sendNotification(notifications, {
+    kind: "refund_request_confirmation",
+    recipients: [toNotificationUser(buyer)],
+    sender: null,
+    data: {
+      refundRequestId: refundRequest.id,
+      courseTitle: course.title,
+      amount: purchase.amountPaid,
+      url: null,
+    },
+    idempotencyKey: `refund-requested:${refundRequest.id}`,
+  });
+
+  // Every Platform Admin as of now: someone promoted later doesn't get the
+  // Notifications raised before. A buyer is never told about their own action.
+  const platformAdmins = db
+    .select()
+    .from(users)
+    .where(eq(users.role, UserRole.Admin))
+    .orderBy(asc(users.id))
+    .all()
+    .filter((admin) => admin.id !== buyer.id);
+
+  if (platformAdmins.length > 0) {
+    await sendNotification(notifications, {
+      kind: "open_refund_request",
+      recipients: platformAdmins.map(toNotificationUser),
+      sender: toNotificationUser(buyer),
+      data: {
+        refundRequestId: refundRequest.id,
+        courseTitle: course.title,
+        amount: purchase.amountPaid,
+        reason,
+        url: "/admin/refunds",
+      },
+      idempotencyKey: `refund-requested:${refundRequest.id}`,
+    });
+  }
 
   return {
     ok: true,
@@ -570,6 +616,9 @@ export function listTeamLicences(db: Queryable, buyerId: number, now: Date) {
 
 export type DecisionResult = { ok: true; email: Email } | Failure;
 
+/** What a decision's transaction hands back, to notify the buyer once it commits. */
+type Decided = { ok: true; email: Email; purchase: Purchase } | Failure;
+
 function findOpenRefundRequest(
   tx: Queryable,
   refundRequestId: number
@@ -611,14 +660,15 @@ function findOpenRefundRequest(
  * - A Team Licence: its Unclaimed Seats can never be claimed. Refused if any
  *   Seat has been claimed (docs/adr/0003).
  */
-export function approveRefundRequest(
+export async function approveRefundRequest(
   db: Db,
   refundRequestId: number,
   platformAdminId: number,
   note: string | null,
-  now: Date
-): DecisionResult {
-  return db.transaction((tx): DecisionResult => {
+  now: Date,
+  notifications: Notifications
+): Promise<DecisionResult> {
+  const decided = db.transaction((tx): Decided => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
 
@@ -680,8 +730,48 @@ export function approveRefundRequest(
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
+      purchase,
     };
   });
+
+  if (!decided.ok) return decided;
+
+  const found = getBuyerAndCourse(db, decided.purchase);
+  if (found) {
+    await sendNotification(notifications, {
+      kind: "refund_request_approved",
+      recipients: [toNotificationUser(found.buyer)],
+      sender: null,
+      data: {
+        refundRequestId,
+        purchaseId: decided.purchase.id,
+        purchasedAt: decided.purchase.createdAt,
+        courseTitle: found.course.title,
+        amount: decided.purchase.amountPaid,
+        decisionNote: note,
+        url: null,
+      },
+      idempotencyKey: `refund-approved:${refundRequestId}`,
+    });
+  }
+
+  return { ok: true, email: decided.email };
+}
+
+/** The buyer is whoever paid: the Team Admin, for a Team Licence. */
+function getBuyerAndCourse(db: Queryable, purchase: Purchase) {
+  const buyer = db
+    .select()
+    .from(users)
+    .where(eq(users.id, purchase.userId))
+    .get();
+  const course = db
+    .select()
+    .from(courses)
+    .where(eq(courses.id, purchase.courseId))
+    .get();
+
+  return buyer && course ? { buyer, course } : null;
 }
 
 /**
@@ -689,13 +779,14 @@ export function approveRefundRequest(
  * the buyer may raise a new Refund Request. The note is required: it is how
  * the buyer learns whether another request is worth raising.
  */
-export function declineRefundRequest(
+export async function declineRefundRequest(
   db: Db,
   refundRequestId: number,
   platformAdminId: number,
   note: string,
-  now: Date
-): DecisionResult {
+  now: Date,
+  notifications: Notifications
+): Promise<DecisionResult> {
   const trimmedNote = note.trim();
 
   if (trimmedNote.length === 0) {
@@ -706,7 +797,7 @@ export function declineRefundRequest(
     };
   }
 
-  return db.transaction((tx): DecisionResult => {
+  const decided = db.transaction((tx): Decided => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
 
@@ -728,8 +819,31 @@ export function declineRefundRequest(
         RefundStatus.Declined,
         trimmedNote
       ),
+      purchase: found.purchase,
     };
   });
+
+  if (!decided.ok) return decided;
+
+  const found = getBuyerAndCourse(db, decided.purchase);
+  if (found) {
+    await sendNotification(notifications, {
+      kind: "refund_request_declined",
+      recipients: [toNotificationUser(found.buyer)],
+      sender: null,
+      data: {
+        refundRequestId,
+        purchaseId: decided.purchase.id,
+        courseTitle: found.course.title,
+        amount: decided.purchase.amountPaid,
+        decisionNote: trimmedNote,
+        url: null,
+      },
+      idempotencyKey: `refund-declined:${refundRequestId}`,
+    });
+  }
+
+  return { ok: true, email: decided.email };
 }
 
 /** The email the buyer gets once their Refund Request is decided. */
