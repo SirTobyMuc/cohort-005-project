@@ -655,4 +655,43 @@ describe("Refund Request Notifications", () => {
 
     expect(sent("refund_request_approved")).toEqual([]);
   });
+
+  it("tells the Team Admin their Refund Request was declined, and that they can ask again", async () => {
+    const priya = addLearner("Priya");
+    const { purchase } = buySeats(priya.id, 1);
+    const id = await raise(purchase.id, priya.id);
+
+    await declineRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      "  Seats are in use.  ",
+      NOW,
+      notifications
+    );
+
+    expect(sent("refund_request_declined")).toEqual([
+      {
+        kind: "refund_request_declined",
+        recipients: [
+          {
+            id: priya.id,
+            name: "Priya",
+            email: "priya@example.com",
+            avatar: null,
+          },
+        ],
+        sender: null,
+        data: {
+          refundRequestId: id,
+          purchaseId: purchase.id,
+          courseTitle: "Test Course",
+          amount: 7900,
+          decisionNote: "Seats are in use.",
+          url: null,
+        },
+        idempotencyKey: `refund-declined:${id}`,
+      },
+    ]);
+  });
 });

@@ -797,7 +797,7 @@ export async function declineRefundRequest(
     };
   }
 
-  return db.transaction((tx): DecisionResult => {
+  const decided = db.transaction((tx): Decided => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
 
@@ -819,8 +819,31 @@ export async function declineRefundRequest(
         RefundStatus.Declined,
         trimmedNote
       ),
+      purchase: found.purchase,
     };
   });
+
+  if (!decided.ok) return decided;
+
+  const found = getBuyerAndCourse(db, decided.purchase);
+  if (found) {
+    await sendNotification(notifications, {
+      kind: "refund_request_declined",
+      recipients: [toNotificationUser(found.buyer)],
+      sender: null,
+      data: {
+        refundRequestId,
+        purchaseId: decided.purchase.id,
+        courseTitle: found.course.title,
+        amount: decided.purchase.amountPaid,
+        decisionNote: trimmedNote,
+        url: null,
+      },
+      idempotencyKey: `refund-declined:${refundRequestId}`,
+    });
+  }
+
+  return { ok: true, email: decided.email };
 }
 
 /** The email the buyer gets once their Refund Request is decided. */

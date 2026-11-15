@@ -58,6 +58,19 @@ export type Notification =
         decisionNote: string | null;
         url: null;
       };
+    }
+  // 2: to the buyer, when a Platform Admin declines their Refund Request.
+  // The row reminds them they can raise a new one.
+  | {
+      kind: "refund_request_declined";
+      data: {
+        refundRequestId: number;
+        purchaseId: number;
+        courseTitle: string;
+        amount: number;
+        decisionNote: string;
+        url: null;
+      };
     };
 
 export type NotificationKind = Notification["kind"];
@@ -115,6 +128,7 @@ const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
   refund_request_confirmation: "refund-request-confirmation",
   open_refund_request: "open-refund-request",
   refund_request_approved: "refund-request-approved",
+  refund_request_declined: "refund-request-declined",
 };
 
 function toKnockUser(user: NotificationUser) {
