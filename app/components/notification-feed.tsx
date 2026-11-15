@@ -18,7 +18,7 @@ import {
   markLoadedRead,
   markLoadedSeen,
   type FeedNotification,
-  type NotificationCategory,
+  type NotificationRowGroup,
   type NotificationCounts,
   type NotificationFeed,
 } from "~/lib/notification-feed";
@@ -307,7 +307,7 @@ function NotificationPopover({
   );
 }
 
-const categoryIcon: Record<NotificationCategory, React.ReactNode> = {
+const groupIcon: Record<NotificationRowGroup, React.ReactNode> = {
   discussion: <MessageSquare />,
   refund: <Receipt />,
   team: <UsersRound />,
@@ -364,7 +364,7 @@ function NotificationRow({
           </span>
         )}
         <span className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-popover text-muted-foreground ring-1 ring-border [&_svg]:size-2.5">
-          {categoryIcon[row.category]}
+          {groupIcon[row.group]}
         </span>
       </span>
       {target ? (
