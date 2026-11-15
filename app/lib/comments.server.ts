@@ -99,7 +99,9 @@ export async function createComment(
     .returning()
     .get();
 
-  if (parentId === null) {
+  // A Discussion Question goes to the Instructor, from anyone but them
+  // (Platform Admins included).
+  if (parentId === null && userId !== course.instructorId) {
     const sender = getUser(db, userId);
     const instructor = getUser(db, course.instructorId);
     await sendNotification(notifications, {

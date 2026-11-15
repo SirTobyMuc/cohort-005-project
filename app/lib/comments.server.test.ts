@@ -311,4 +311,40 @@ describe("Discussion Notifications", () => {
       },
     ]);
   });
+
+  it("tells the Instructor about a Discussion Question from a Platform Admin", async () => {
+    const admin = db
+      .insert(schema.users)
+      .values({
+        name: "Ada Admin",
+        email: "ada@example.com",
+        role: schema.UserRole.Admin,
+      })
+      .returning()
+      .get();
+
+    await createComment(db, admin.id, lessonId, null, "Q?", NOW, notifications);
+
+    expect(notifications.triggers).toMatchObject([
+      {
+        kind: "discussion_question",
+        recipients: [asNotificationUser(base.instructor)],
+        sender: asNotificationUser(admin),
+      },
+    ]);
+  });
+
+  it("tells nobody when the Instructor posts a top-level comment", async () => {
+    await createComment(
+      db,
+      base.instructor.id,
+      lessonId,
+      null,
+      "Welcome to the lesson!",
+      NOW,
+      notifications
+    );
+
+    expect(notifications.triggers).toEqual([]);
+  });
 });
