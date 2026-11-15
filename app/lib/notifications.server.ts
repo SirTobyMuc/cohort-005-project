@@ -193,7 +193,8 @@ function toKnockUser(user: NotificationUser) {
     id: String(user.id),
     name: user.name,
     email: user.email,
-    ...(user.avatar ? { avatar: user.avatar } : {}),
+    // Null rather than left out, so a removed avatar is cleared in Knock.
+    avatar: user.avatar,
   };
 }
 
