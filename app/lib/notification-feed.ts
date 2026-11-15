@@ -1,4 +1,4 @@
-import type { Notification } from "~/lib/notifications.server";
+import type { Notification } from "~/lib/notification-kinds";
 import { formatPrice } from "~/lib/utils";
 
 // ─── Notification Feed (client port) ───
