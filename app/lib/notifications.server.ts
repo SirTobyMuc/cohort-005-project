@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
 import Knock, { NotFoundError, signUserToken } from "@knocklabs/node";
+import { z } from "zod";
 import { KNOCK_WORKFLOW_KEYS } from "~/lib/knock-workflows";
 import type { Notification } from "~/lib/notification-kinds";
 
@@ -205,9 +206,41 @@ const KNOCK_CHANNEL_TYPES: Record<NotificationChannel, "in_app_feed"> = {
 };
 const KNOCK_PREFERENCE_SET = "default";
 
-type KnockCategorySetting =
-  boolean | { channel_types?: Partial<Record<string, unknown>> | null };
+const knockCategorySettingSchema = z.union([
+  z.boolean(),
+  z
+    .object({
+      channel_types: z.record(z.string(), z.unknown()).nullish(),
+    })
+    .passthrough(), // Other Knock fields are written back untouched.
+]);
+type KnockCategorySetting = z.infer<typeof knockCategorySettingSchema>;
 type KnockCategories = Record<string, KnockCategorySetting>;
+
+/**
+ * Knock's categories, checked one by one. A setting that doesn't fit is
+ * logged and left out.
+ */
+function parseKnockCategories(userId: number, raw: unknown): KnockCategories {
+  const categories = z.record(z.string(), z.unknown()).safeParse(raw ?? {});
+  if (!categories.success) {
+    console.error(`Knock preferences for user ${userId} left out:`, raw);
+    return {};
+  }
+  const parsed: KnockCategories = {};
+  for (const [key, value] of Object.entries(categories.data)) {
+    const setting = knockCategorySettingSchema.safeParse(value);
+    if (setting.success) {
+      parsed[key] = setting.data;
+    } else {
+      console.error(
+        `Knock preference ${key} for user ${userId} left out:`,
+        setting.error
+      );
+    }
+  }
+  return parsed;
+}
 
 function fromKnockCategories(
   categories: KnockCategories
@@ -260,7 +293,7 @@ export function knockNotifications(
         String(userId),
         KNOCK_PREFERENCE_SET
       );
-      const categories = (set.categories ?? {}) as KnockCategories;
+      const categories = parseKnockCategories(userId, set.categories);
       return Object.keys(categories).length > 0 ? categories : null;
     } catch (error) {
       if (error instanceof NotFoundError) return null;
