@@ -69,10 +69,7 @@ export function emptyNotificationFeed(): NotificationFeed {
 // Cadence writes each row from the Notification's data, not Knock templates.
 
 export type NotificationCategory =
-  | "discussion"
-  | "refund"
-  | "team"
-  | "enrollment";
+  "discussion" | "refund" | "team" | "enrollment";
 
 export type NotificationRow = {
   category: NotificationCategory;

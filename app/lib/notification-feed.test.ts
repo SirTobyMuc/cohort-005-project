@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { describeNotification, type FeedNotification } from "./notification-feed";
+import {
+  describeNotification,
+  type FeedNotification,
+} from "./notification-feed";
 
 const received = {
   id: "msg_1",
