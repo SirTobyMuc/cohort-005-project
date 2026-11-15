@@ -221,7 +221,8 @@ function readKnockFeedEnv(): KnockFeedEnv {
 /**
  * Signs a user token (RS256, `sub` = the Cadence user id) and returns the feed
  * config for that user, or null without Knock's client keys: the feed is then
- * empty and nothing errors.
+ * empty and nothing errors. A key that can't sign is logged, not thrown, so
+ * it never breaks the page.
  */
 export async function notificationFeedConfig(
   cadenceUserId: number,
@@ -233,15 +234,23 @@ export async function notificationFeedConfig(
     return null;
   }
   const userId = String(cadenceUserId);
-  return {
-    publicApiKey: KNOCK_PUBLIC_API_KEY,
-    feedChannelId: KNOCK_FEED_CHANNEL_ID,
-    userId,
-    userToken: await signUserToken(userId, {
-      signingKey: KNOCK_SIGNING_KEY,
-      expiresInSeconds: 60 * 60,
-    }),
-  };
+  try {
+    return {
+      publicApiKey: KNOCK_PUBLIC_API_KEY,
+      feedChannelId: KNOCK_FEED_CHANNEL_ID,
+      userId,
+      userToken: await signUserToken(userId, {
+        signingKey: KNOCK_SIGNING_KEY,
+        expiresInSeconds: 60 * 60,
+      }),
+    };
+  } catch (error) {
+    console.error(
+      `Notification Feed token for user ${userId} not signed: check KNOCK_SIGNING_KEY`,
+      error
+    );
+    return null;
+  }
 }
 
 /** Records every trigger, for tests to check what was sent. */

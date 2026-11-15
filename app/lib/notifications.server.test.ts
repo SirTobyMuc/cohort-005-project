@@ -58,6 +58,19 @@ describe("notificationFeedConfig", () => {
     expect(await notificationFeedConfig(42, {})).toBeNull();
   });
 
+  it("logs and gives no feed when the signing key is unusable", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const config = await notificationFeedConfig(42, {
+      KNOCK_PUBLIC_API_KEY: "pk_test_123",
+      KNOCK_SIGNING_KEY: "-----BEGIN PRIVATE KEY-----\nnot a key",
+      KNOCK_FEED_CHANNEL_ID: "feed-channel",
+    });
+
+    expect(config).toBeNull();
+    expect(log).toHaveBeenCalled();
+  });
+
   it("signs an RS256 token for that user only", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
