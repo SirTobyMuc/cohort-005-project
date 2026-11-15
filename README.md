@@ -81,7 +81,7 @@ It needs to be public: GitHub Actions minutes are free on public repos, and the 
 
 You don't need these yet, but you'll be asked for them along the way. Both have a free option:
 
-- **[Knock](https://knock.app/)**, a free Developer account, when you build notifications. Its keys go in `.env`, which is gitignored.
+- **[Knock](https://knock.app/)**, a free Developer account, when you build notifications. Its keys go in `.env`, which is gitignored. Run `bash scripts/knock-setup-wizard.sh` and it walks you from login to a filled-in `.env`.
 - **[tldraw](https://www.tldraw.com/)**, for whiteboarding your tasks. Any drawing app will do.
 
 ## Scripts
