@@ -87,6 +87,14 @@ export async function saveNotificationPreference(
   }
 
   const { category, enabled } = parsed.data;
-  await port.setPreference(userId, category, "feed", enabled);
+  try {
+    await port.setPreference(userId, category, "feed", enabled);
+  } catch (error) {
+    console.error("Failed to save notification preference", error);
+    return {
+      ok: false,
+      error: "Couldn't save your notification settings. Try again.",
+    };
+  }
   return { ok: true };
 }

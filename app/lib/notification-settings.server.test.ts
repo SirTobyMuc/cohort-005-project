@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { buyTeamLicence, createPurchase } from "./purchases.server";
@@ -131,5 +131,43 @@ describe("saveNotificationPreference", () => {
       discussion_questions: { feed: true },
       discussion_replies: { feed: false },
     });
+  });
+
+  it("rejects an unknown category without saving anything", async () => {
+    const notifications = fakeNotifications();
+
+    const result = await saveNotificationPreference(
+      notifications,
+      base.user.id,
+      form({ category: "marketing", enabled: "false" })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(await notifications.getPreferences(base.user.id)).toEqual(
+      await fakeNotifications().getPreferences(base.user.id)
+    );
+  });
+
+  it("reports a failed save instead of throwing", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing = {
+      ...fakeNotifications(),
+      async setPreference() {
+        throw new Error("down");
+      },
+    };
+
+    const result = await saveNotificationPreference(
+      failing,
+      base.user.id,
+      form({ category: "discussion_replies", enabled: "false" })
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Couldn't save your notification settings. Try again.",
+    });
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
