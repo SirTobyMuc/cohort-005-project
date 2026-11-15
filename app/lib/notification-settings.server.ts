@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { purchases } from "~/db/schema";
+import { and, eq } from "drizzle-orm";
+import { coupons, purchases, teamMembers, TeamMemberRole } from "~/db/schema";
 import type { Db } from "~/lib/refunds.server";
 import {
   NOTIFICATION_CATEGORIES,
@@ -23,10 +23,23 @@ export function visibleNotificationCategories(
     .where(eq(purchases.userId, userId))
     .get();
 
+  // Every Team Licence grants Seats, so a team with a Seat has a Team Licence.
+  const isTeamAdminOnLicence = !!db
+    .select({ id: coupons.id })
+    .from(teamMembers)
+    .innerJoin(coupons, eq(coupons.teamId, teamMembers.teamId))
+    .where(
+      and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.role, TeamMemberRole.Admin)
+      )
+    )
+    .get();
+
   const applies: Record<NotificationCategory, boolean> = {
     refund_request_updates: hasPurchase,
     open_refund_requests: false,
-    seat_claims: false,
+    seat_claims: isTeamAdminOnLicence,
     enrollments: false,
     discussion_questions: false,
     discussion_replies: true,
