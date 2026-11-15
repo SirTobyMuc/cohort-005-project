@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
-import Knock, { signUserToken } from "@knocklabs/node";
+import Knock, { NotFoundError, signUserToken } from "@knocklabs/node";
 
 // ─── Notifications ───
 // The Cadence-owned port for sending Notifications (see GLOSSARY.md and #46).
@@ -71,7 +71,31 @@ export type Notification =
         decisionNote: string;
         url: null;
       };
+    }
+  // 6: to the course's Instructor, when someone else asks a Discussion
+  // Question.
+  | {
+      kind: "discussion_question";
+      data: DiscussionNotificationData;
+    }
+  // 7: to the question's author only, when someone else Replies to it.
+  | {
+      kind: "discussion_reply";
+      data: DiscussionNotificationData;
     };
+
+/**
+ * What Discussion Notifications carry. `commentId` is the comment that caused
+ * the Notification. `snippet` is its text as posted, so later edits change
+ * nothing. `url` is the lesson, scrolled to the comment.
+ */
+export type DiscussionNotificationData = {
+  commentId: number;
+  courseTitle: string;
+  lessonTitle: string;
+  snippet: string;
+  url: string;
+};
 
 export type NotificationKind = Notification["kind"];
 
@@ -85,6 +109,89 @@ export type NotificationTrigger = Notification & {
 
 export interface Notifications {
   trigger(notification: NotificationTrigger): Promise<void>;
+}
+
+/**
+ * Keeps the vendor's copy of a user and their preferences. Separate from
+ * `Notifications` so trigger-only adapters still fit where only triggering is
+ * needed.
+ */
+export interface NotificationUsers {
+  /**
+   * Creates or updates the user, and writes the default preferences only if
+   * they have none yet. Existing choices are never overwritten.
+   */
+  syncUser(user: NotificationUser): Promise<void>;
+  /** The user's preferences, or the defaults if they have none yet. */
+  getPreferences(userId: number): Promise<NotificationPreferences>;
+  /** Sets one category × channel switch, leaving the others alone. */
+  setPreference(
+    userId: number,
+    category: NotificationCategory,
+    channel: NotificationChannel,
+    enabled: boolean
+  ): Promise<void>;
+}
+
+// ─── Preferences ───
+// Modelled as category × channel. Only the adapters know Knock's keys.
+
+export const NOTIFICATION_CATEGORIES = [
+  "refund_request_updates",
+  "open_refund_requests",
+  "seat_claims",
+  "enrollments",
+  "discussion_questions",
+  "discussion_replies",
+] as const;
+
+export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
+
+/** The only channel in v1 is the in-app feed. */
+export const NOTIFICATION_CHANNELS = ["feed"] as const;
+
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
+export type NotificationPreferences = Record<
+  NotificationCategory,
+  Record<NotificationChannel, boolean>
+>;
+
+/** Every category on, except Enrollments. */
+export function defaultPreferences(): NotificationPreferences {
+  return {
+    refund_request_updates: { feed: true },
+    open_refund_requests: { feed: true },
+    seat_claims: { feed: true },
+    enrollments: { feed: false },
+    discussion_questions: { feed: true },
+    discussion_replies: { feed: true },
+  };
+}
+
+function withPreference(
+  preferences: NotificationPreferences,
+  category: NotificationCategory,
+  channel: NotificationChannel,
+  enabled: boolean
+): NotificationPreferences {
+  return {
+    ...preferences,
+    [category]: { ...preferences[category], [channel]: enabled },
+  };
+}
+
+/** The domain event that caused Notifications, for archiving them all. */
+export type NotificationCause = { commentId: number };
+
+/**
+ * Takes Notifications back out of their recipients' feeds once what caused
+ * them is gone. Separate from `Notifications` so trigger-only adapters still
+ * fit where only triggering is needed.
+ */
+export interface NotificationArchive {
+  /** Archives every Notification whose `data` matches the cause. */
+  archive(cause: NotificationCause): Promise<void>;
 }
 
 export function toNotificationUser(user: {
@@ -119,6 +226,36 @@ export async function sendNotification(
   }
 }
 
+/**
+ * Syncs one user, best-effort like sendNotification: a failure is logged and
+ * swallowed, so it never fails signup, a profile save or an admin edit.
+ */
+export async function syncNotificationUser(
+  notifications: NotificationUsers,
+  user: NotificationUser
+): Promise<void> {
+  try {
+    await notifications.syncUser(user);
+  } catch (error) {
+    console.error(`Notification user sync for user ${user.id} failed:`, error);
+  }
+}
+
+/** Archives a cause's Notifications, best-effort like `sendNotification`. */
+export async function archiveNotifications(
+  archive: NotificationArchive,
+  cause: NotificationCause
+): Promise<void> {
+  try {
+    await archive.archive(cause);
+  } catch (error) {
+    console.error(
+      `Archiving Notifications for ${JSON.stringify(cause)} failed:`,
+      error
+    );
+  }
+}
+
 // ─── Adapters ───
 
 // Only this adapter knows Knock's keys. Each Notification is one workflow,
@@ -129,6 +266,8 @@ const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
   open_refund_request: "open-refund-request",
   refund_request_approved: "refund-request-approved",
   refund_request_declined: "refund-request-declined",
+  discussion_question: "discussion-question",
+  discussion_reply: "discussion-reply",
 };
 
 function toKnockUser(user: NotificationUser) {
@@ -140,9 +279,94 @@ function toKnockUser(user: NotificationUser) {
   };
 }
 
-export function knockNotifications(secretApiKey: string): Notifications {
+// Cadence's category names are Knock's category keys (see the workflows on
+// the knock-workflows branch). Cadence's `feed` channel is Knock's in-app feed.
+const KNOCK_CHANNEL_TYPES: Record<NotificationChannel, "in_app_feed"> = {
+  feed: "in_app_feed",
+};
+const KNOCK_PREFERENCE_SET = "default";
+
+type KnockCategorySetting =
+  | boolean
+  | { channel_types?: Partial<Record<string, unknown>> | null };
+type KnockCategories = Record<string, KnockCategorySetting>;
+
+function fromKnockCategories(
+  categories: KnockCategories
+): NotificationPreferences {
+  let preferences = defaultPreferences();
+  for (const category of NOTIFICATION_CATEGORIES) {
+    const setting = categories[category];
+    if (setting === undefined) continue;
+    for (const channel of NOTIFICATION_CHANNELS) {
+      const value =
+        typeof setting === "boolean"
+          ? setting
+          : setting.channel_types?.[KNOCK_CHANNEL_TYPES[channel]];
+      if (typeof value === "boolean") {
+        preferences = withPreference(preferences, category, channel, value);
+      }
+    }
+  }
+  return preferences;
+}
+
+function toKnockCategories(preferences: NotificationPreferences) {
+  return Object.fromEntries(
+    NOTIFICATION_CATEGORIES.map((category) => [
+      category,
+      {
+        channel_types: Object.fromEntries(
+          NOTIFICATION_CHANNELS.map((channel) => [
+            KNOCK_CHANNEL_TYPES[channel],
+            preferences[category][channel],
+          ])
+        ),
+      },
+    ])
+  );
+}
+
+// Knock's batch endpoints take at most 50 message ids.
+const KNOCK_BATCH_SIZE = 50;
+
+export function knockNotifications(
+  secretApiKey: string
+): Notifications & NotificationArchive & NotificationUsers {
   const knock = new Knock({ apiKey: secretApiKey });
+
+  /** The user's own Knock categories, or null if they have none yet. */
+  async function readCategories(userId: number) {
+    try {
+      const set = await knock.users.getPreferences(
+        String(userId),
+        KNOCK_PREFERENCE_SET
+      );
+      const categories = (set.categories ?? {}) as KnockCategories;
+      return Object.keys(categories).length > 0 ? categories : null;
+    } catch (error) {
+      if (error instanceof NotFoundError) return null;
+      throw error;
+    }
+  }
+
   return {
+    // Every Notification's trigger data carries its cause (e.g. `commentId`),
+    // so List Messages' `trigger_data` filter finds what to archive. No
+    // mapping of causes to message ids is kept on our side.
+    async archive(cause) {
+      const messageIds: string[] = [];
+      for await (const message of knock.messages.list({
+        trigger_data: JSON.stringify(cause),
+      })) {
+        if (!message.archived_at) messageIds.push(message.id);
+      }
+      for (let i = 0; i < messageIds.length; i += KNOCK_BATCH_SIZE) {
+        await knock.messages.batch.archive({
+          message_ids: messageIds.slice(i, i + KNOCK_BATCH_SIZE),
+        });
+      }
+    },
     async trigger(notification) {
       const workflowKey = KNOCK_WORKFLOW_KEYS[notification.kind];
       await knock.workflows.trigger(
@@ -157,12 +381,45 @@ export function knockNotifications(secretApiKey: string): Notifications {
         { idempotencyKey: `${workflowKey}:${notification.idempotencyKey}` }
       );
     },
+    async syncUser(user) {
+      const { id, ...properties } = toKnockUser(user);
+      await knock.users.update(id, properties);
+      if ((await readCategories(user.id)) === null) {
+        await knock.users.setPreferences(id, KNOCK_PREFERENCE_SET, {
+          categories: toKnockCategories(defaultPreferences()),
+        });
+      }
+    },
+    async getPreferences(userId) {
+      return fromKnockCategories((await readCategories(userId)) ?? {});
+    },
+    async setPreference(userId, category, channel, enabled) {
+      // Knock's setPreferences replaces the whole set, so read, merge one
+      // switch and write it all back. Unknown Knock categories are kept.
+      const existing = (await readCategories(userId)) ?? {};
+      const merged = withPreference(
+        fromKnockCategories(existing),
+        category,
+        channel,
+        enabled
+      );
+      await knock.users.setPreferences(String(userId), KNOCK_PREFERENCE_SET, {
+        categories: { ...existing, ...toKnockCategories(merged) },
+      });
+    },
   };
 }
 
 /** Logs instead of sending, for running without Knock (local dev, CI). */
-export function noopNotifications(): Notifications {
+export function noopNotifications(): Notifications &
+  NotificationArchive &
+  NotificationUsers {
   return {
+    async archive(cause) {
+      console.info(
+        `[notifications] archive ${JSON.stringify(cause)} not sent: no KNOCK_SECRET_API_KEY`
+      );
+    },
     async trigger(notification) {
       console.info(
         `[notifications] ${notification.kind} to ${notification.recipients
@@ -170,6 +427,19 @@ export function noopNotifications(): Notifications {
           .join(
             ", "
           )} (${notification.idempotencyKey}) not sent: no KNOCK_SECRET_API_KEY`
+      );
+    },
+    async syncUser(user) {
+      console.info(
+        `[notifications] user ${user.id} not synced: no KNOCK_SECRET_API_KEY`
+      );
+    },
+    async getPreferences() {
+      return defaultPreferences();
+    },
+    async setPreference(userId, category, channel, enabled) {
+      console.info(
+        `[notifications] ${category}/${channel}=${enabled} for user ${userId} not saved: no KNOCK_SECRET_API_KEY`
       );
     },
   };
@@ -185,10 +455,15 @@ function readKnockEnv(): KnockEnv {
   return parseEnv(readFileSync(".env", "utf8"));
 }
 
+/** Whether a Knock secret key is set, for scripts that skip work without it. */
+export function isKnockConfigured(env: KnockEnv = readKnockEnv()): boolean {
+  return Boolean(env.KNOCK_SECRET_API_KEY);
+}
+
 /** Knock when a secret key is set, otherwise the no-op adapter. */
 export function defaultNotifications(
   env: KnockEnv = readKnockEnv()
-): Notifications {
+): Notifications & NotificationArchive & NotificationUsers {
   const secretApiKey = env.KNOCK_SECRET_API_KEY;
   return secretApiKey ? knockNotifications(secretApiKey) : noopNotifications();
 }
@@ -253,15 +528,54 @@ export async function notificationFeedConfig(
   }
 }
 
-/** Records every trigger, for tests to check what was sent. */
-export function fakeNotifications(): Notifications & {
-  triggers: NotificationTrigger[];
-} {
+/**
+ * Records every trigger and sync, for tests to check what was sent. `archive`
+ * matches on trigger data like Knock's `trigger_data` filter, moving what it
+ * hits into `archived`. Preferences are kept in memory, with the same
+ * defaults-only-if-none and merge rules as the Knock adapter.
+ */
+export function fakeNotifications(): Notifications &
+  NotificationArchive &
+  NotificationUsers & {
+    triggers: NotificationTrigger[];
+    archived: NotificationTrigger[];
+    syncs: NotificationUser[];
+  } {
   const triggers: NotificationTrigger[] = [];
+  const archived: NotificationTrigger[] = [];
+  const syncs: NotificationUser[] = [];
+  const preferences = new Map<number, NotificationPreferences>();
   return {
     triggers,
+    archived,
+    syncs,
     async trigger(notification) {
       triggers.push(notification);
+    },
+    async archive(cause) {
+      const matches = (t: NotificationTrigger) =>
+        Object.entries(cause).every(
+          ([key, value]) => (t.data as Record<string, unknown>)[key] === value
+        );
+      archived.push(
+        ...triggers.filter((t) => matches(t) && !archived.includes(t))
+      );
+    },
+    async syncUser(user) {
+      syncs.push(user);
+      if (!preferences.has(user.id)) {
+        preferences.set(user.id, defaultPreferences());
+      }
+    },
+    async getPreferences(userId) {
+      return preferences.get(userId) ?? defaultPreferences();
+    },
+    async setPreference(userId, category, channel, enabled) {
+      const current = preferences.get(userId) ?? defaultPreferences();
+      preferences.set(
+        userId,
+        withPreference(current, category, channel, enabled)
+      );
     },
   };
 }

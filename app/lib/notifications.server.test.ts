@@ -2,6 +2,7 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   defaultNotifications,
+  fakeNotifications,
   notificationFeedConfig,
   sendNotification,
   type NotificationTrigger,
@@ -99,5 +100,49 @@ describe("notificationFeedConfig", () => {
         .update(`${header}.${payload}`)
         .verify(publicKey, signature, "base64url")
     ).toBe(true);
+  });
+});
+
+describe("preferences", () => {
+  const ana = { id: 1, name: "Ana", email: "ana@example.com", avatar: null };
+
+  it("setting one switch leaves the other categories unchanged", async () => {
+    const notifications = fakeNotifications();
+    await notifications.syncUser(ana);
+    await notifications.setPreference(ana.id, "discussion_replies", "feed", false);
+
+    await notifications.setPreference(ana.id, "enrollments", "feed", true);
+
+    expect(await notifications.getPreferences(ana.id)).toEqual({
+      refund_request_updates: { feed: true },
+      open_refund_requests: { feed: true },
+      seat_claims: { feed: true },
+      enrollments: { feed: true },
+      discussion_questions: { feed: true },
+      discussion_replies: { feed: false },
+    });
+  });
+
+  it("syncing again never overwrites existing choices", async () => {
+    const notifications = fakeNotifications();
+    await notifications.syncUser(ana);
+    await notifications.setPreference(ana.id, "seat_claims", "feed", false);
+
+    await notifications.syncUser({ ...ana, name: "Ana Lima" });
+
+    expect((await notifications.getPreferences(ana.id)).seat_claims).toEqual({
+      feed: false,
+    });
+  });
+
+  it("the no-op adapter reports the defaults without Knock", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const notifications = defaultNotifications({});
+    await notifications.syncUser(ana);
+
+    expect(await notifications.getPreferences(ana.id)).toMatchObject({
+      enrollments: { feed: false },
+      discussion_questions: { feed: true },
+    });
   });
 });

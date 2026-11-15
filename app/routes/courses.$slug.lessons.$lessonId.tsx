@@ -60,6 +60,7 @@ import { data, isRouteErrorResponse } from "react-router";
 import { z } from "zod";
 import { COUNTRIES } from "~/lib/ppp";
 import { parseFormData, parseParams } from "~/lib/validation";
+import { defaultNotifications } from "~/lib/notifications.server";
 
 const lessonParamsSchema = z.object({
   slug: z.string().min(1),
@@ -835,13 +836,14 @@ export async function action({ params, request }: Route.ActionArgs) {
         if (!parsed.success) {
           return { ok: false, error: "Enter a comment before posting." };
         }
-        createComment(
+        await createComment(
           db,
           currentUserId,
           lessonId,
           parsed.data.parentId ?? null,
           parsed.data.body,
-          new Date()
+          new Date(),
+          defaultNotifications()
         );
         return { ok: true };
       }
@@ -869,12 +871,13 @@ export async function action({ params, request }: Route.ActionArgs) {
       if (!existing || existing.lessonId !== lessonId) {
         throw data("Comment not found", { status: 404 });
       }
-      deleteComment(
+      await deleteComment(
         db,
         parsed.data.commentId,
         currentUserId,
         access.isStaff,
-        new Date()
+        new Date(),
+        defaultNotifications()
       );
       return { ok: true };
     } catch (error) {
