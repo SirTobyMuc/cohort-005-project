@@ -71,7 +71,31 @@ export type Notification =
         decisionNote: string;
         url: null;
       };
+    }
+  // 6: to the course's Instructor, when someone else asks a Discussion
+  // Question.
+  | {
+      kind: "discussion_question";
+      data: DiscussionNotificationData;
+    }
+  // 7: to the question's author only, when someone else Replies to it.
+  | {
+      kind: "discussion_reply";
+      data: DiscussionNotificationData;
     };
+
+/**
+ * What Discussion Notifications carry. `commentId` is the comment that caused
+ * the Notification. `snippet` is its text as posted, so later edits change
+ * nothing. `url` is the lesson, scrolled to the comment.
+ */
+export type DiscussionNotificationData = {
+  commentId: number;
+  courseTitle: string;
+  lessonTitle: string;
+  snippet: string;
+  url: string;
+};
 
 export type NotificationKind = Notification["kind"];
 
@@ -129,6 +153,8 @@ const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
   open_refund_request: "open-refund-request",
   refund_request_approved: "refund-request-approved",
   refund_request_declined: "refund-request-declined",
+  discussion_question: "discussion-question",
+  discussion_reply: "discussion-reply",
 };
 
 function toKnockUser(user: NotificationUser) {

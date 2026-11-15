@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { fakeNotifications } from "~/lib/notifications.server";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { createComment, deleteComment } from "./comments.server";
@@ -11,10 +12,12 @@ let db: TestDb;
 let base: ReturnType<typeof seedBaseData>;
 let lessonId: number;
 let otherLessonId: number;
+let notifications: ReturnType<typeof fakeNotifications>;
 
 beforeEach(() => {
   db = createTestDb();
   base = seedBaseData(db);
+  notifications = fakeNotifications();
 
   const module = db
     .insert(schema.modules)
@@ -33,14 +36,15 @@ beforeEach(() => {
 });
 
 describe("createComment", () => {
-  it("posts a Discussion Question with a trimmed body, dated now", () => {
-    const question = createComment(
+  it("posts a Discussion Question with a trimmed body, dated now", async () => {
+    const question = await createComment(
       db,
       base.user.id,
       lessonId,
       null,
       "  How do closures work?  ",
-      NOW
+      NOW,
+      notifications
     );
 
     expect(question).toMatchObject({
@@ -53,16 +57,25 @@ describe("createComment", () => {
     });
   });
 
-  it("posts a Reply under a Discussion Question", () => {
-    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
+  it("posts a Reply under a Discussion Question", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
 
-    const reply = createComment(
+    const reply = await createComment(
       db,
       base.instructor.id,
       lessonId,
       question.id,
       "Answer",
-      NOW
+      NOW,
+      notifications
     );
 
     expect(reply).toMatchObject({
@@ -73,52 +86,115 @@ describe("createComment", () => {
     });
   });
 
-  it("refuses a Reply to a Reply", () => {
-    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
-    const reply = createComment(db, base.instructor.id, lessonId, question.id, "A", NOW);
+  it("refuses a Reply to a Reply", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
+    const reply = await createComment(
+      db,
+      base.instructor.id,
+      lessonId,
+      question.id,
+      "A",
+      NOW,
+      notifications
+    );
 
-    expect(() =>
-      createComment(db, base.user.id, lessonId, reply.id, "Nested", NOW)
-    ).toThrow("Replies can only be one level deep");
+    await expect(
+      createComment(
+        db,
+        base.user.id,
+        lessonId,
+        reply.id,
+        "Nested",
+        NOW,
+        notifications
+      )
+    ).rejects.toThrow("Replies can only be one level deep");
   });
 
-  it("refuses a Reply to a question on a different lesson", () => {
-    const question = createComment(db, base.user.id, otherLessonId, null, "Q?", NOW);
+  it("refuses a Reply to a question on a different lesson", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      otherLessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
 
-    expect(() =>
-      createComment(db, base.instructor.id, lessonId, question.id, "A", NOW)
-    ).toThrow("Parent comment belongs to a different lesson");
+    await expect(
+      createComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        question.id,
+        "A",
+        NOW,
+        notifications
+      )
+    ).rejects.toThrow("Parent comment belongs to a different lesson");
   });
 
-  it("refuses a Reply to a comment that doesn't exist", () => {
-    expect(() =>
-      createComment(db, base.user.id, lessonId, 9999, "A", NOW)
-    ).toThrow("Parent comment not found");
+  it("refuses a Reply to a comment that doesn't exist", async () => {
+    await expect(
+      createComment(db, base.user.id, lessonId, 9999, "A", NOW, notifications)
+    ).rejects.toThrow("Parent comment not found");
   });
 
-  it("refuses a comment on a lesson that doesn't exist", () => {
-    expect(() =>
-      createComment(db, base.user.id, 9999, null, "Q?", NOW)
-    ).toThrow("Lesson not found");
+  it("refuses a comment on a lesson that doesn't exist", async () => {
+    await expect(
+      createComment(db, base.user.id, 9999, null, "Q?", NOW, notifications)
+    ).rejects.toThrow("Lesson not found");
   });
 
-  it("refuses an empty or over-long body", () => {
-    expect(() =>
-      createComment(db, base.user.id, lessonId, null, "   ", NOW)
-    ).toThrow("Comment cannot be empty");
-    expect(() =>
-      createComment(db, base.user.id, lessonId, null, "x".repeat(5001), NOW)
-    ).toThrow("Comment must be 5000 characters or fewer");
+  it("refuses an empty or over-long body", async () => {
+    await expect(
+      createComment(db, base.user.id, lessonId, null, "   ", NOW, notifications)
+    ).rejects.toThrow("Comment cannot be empty");
+    await expect(
+      createComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "x".repeat(5001),
+        NOW,
+        notifications
+      )
+    ).rejects.toThrow("Comment must be 5000 characters or fewer");
   });
 });
 
 describe("deleteComment", () => {
   const LATER = new Date(2026, 9, 7, 9, 0, 0);
 
-  it("soft-deletes the author's own comment, dated now", () => {
-    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
+  it("soft-deletes the author's own comment, dated now", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
 
-    const deleted = deleteComment(db, question.id, base.user.id, false, LATER);
+    const deleted = await deleteComment(
+      db,
+      question.id,
+      base.user.id,
+      false,
+      LATER,
+      notifications
+    );
 
     expect(deleted).toMatchObject({
       id: question.id,
@@ -127,29 +203,112 @@ describe("deleteComment", () => {
     });
   });
 
-  it("refuses to delete someone else's comment unless the deleter is staff", () => {
-    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
+  it("refuses to delete someone else's comment unless the deleter is staff", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
 
-    expect(() =>
-      deleteComment(db, question.id, base.instructor.id, false, LATER)
-    ).toThrow("You can only delete your own comments");
+    await expect(
+      deleteComment(
+        db,
+        question.id,
+        base.instructor.id,
+        false,
+        LATER,
+        notifications
+      )
+    ).rejects.toThrow("You can only delete your own comments");
 
-    const deleted = deleteComment(db, question.id, base.instructor.id, true, LATER);
+    const deleted = await deleteComment(
+      db,
+      question.id,
+      base.instructor.id,
+      true,
+      LATER,
+      notifications
+    );
     expect(deleted.deletedAt).toBe(LATER.toISOString());
   });
 
-  it("leaves an already-deleted comment as it was", () => {
-    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
-    deleteComment(db, question.id, base.user.id, false, NOW);
+  it("leaves an already-deleted comment as it was", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "Q?",
+      NOW,
+      notifications
+    );
+    await deleteComment(
+      db,
+      question.id,
+      base.user.id,
+      false,
+      NOW,
+      notifications
+    );
 
-    const again = deleteComment(db, question.id, base.user.id, false, LATER);
+    const again = await deleteComment(
+      db,
+      question.id,
+      base.user.id,
+      false,
+      LATER,
+      notifications
+    );
 
     expect(again.deletedAt).toBe(NOW.toISOString());
   });
 
-  it("refuses to delete a comment that doesn't exist", () => {
-    expect(() => deleteComment(db, 9999, base.user.id, true, LATER)).toThrow(
-      "Comment not found"
+  it("refuses to delete a comment that doesn't exist", async () => {
+    await expect(
+      deleteComment(db, 9999, base.user.id, true, LATER, notifications)
+    ).rejects.toThrow("Comment not found");
+  });
+});
+
+describe("Discussion Notifications", () => {
+  function asNotificationUser(user: typeof base.user) {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatarUrl,
+    };
+  }
+
+  it("tells the Instructor about a Discussion Question from a student", async () => {
+    const question = await createComment(
+      db,
+      base.user.id,
+      lessonId,
+      null,
+      "How do closures work?",
+      NOW,
+      notifications
     );
+
+    expect(notifications.triggers).toEqual([
+      {
+        kind: "discussion_question",
+        recipients: [asNotificationUser(base.instructor)],
+        sender: asNotificationUser(base.user),
+        data: {
+          commentId: question.id,
+          courseTitle: "Test Course",
+          lessonTitle: "Lesson 1",
+          snippet: "How do closures work?",
+          url: `/courses/test-course/lessons/${lessonId}#comment-${question.id}`,
+        },
+        idempotencyKey: `discussion-question:${question.id}`,
+      },
+    ]);
   });
 });

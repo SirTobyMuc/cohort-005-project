@@ -1,8 +1,14 @@
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { comments, courses, lessons, modules } from "~/db/schema";
+import { comments, courses, lessons, modules, users } from "~/db/schema";
 import { MIN_COMMENT_LENGTH, MAX_COMMENT_LENGTH } from "~/lib/comments";
+import {
+  sendNotification,
+  toNotificationUser,
+  type DiscussionNotificationData,
+  type Notifications,
+} from "~/lib/notifications.server";
 
 // ─── Comments ───
 // Writing Discussion Questions and Replies, and soft-deleting them. Routes call
@@ -34,7 +40,13 @@ export function validateCommentBody(body: string) {
 
 function getCourseForLesson(db: Db, lessonId: number) {
   return db
-    .select({ courseId: courses.id, instructorId: courses.instructorId })
+    .select({
+      courseId: courses.id,
+      instructorId: courses.instructorId,
+      courseTitle: courses.title,
+      courseSlug: courses.slug,
+      lessonTitle: lessons.title,
+    })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
     .innerJoin(courses, eq(modules.courseId, courses.id))
@@ -46,13 +58,14 @@ function getCourseForLesson(db: Db, lessonId: number) {
  * Posts a Discussion Question (parentId null) or a Reply to one. Replies are
  * one level deep and must sit on the same lesson as their question.
  */
-export function createComment(
+export async function createComment(
   db: Db,
   userId: number,
   lessonId: number,
   parentId: number | null,
   body: string,
-  now: Date
+  now: Date,
+  notifications: Notifications
 ) {
   const trimmed = validateCommentBody(body);
 
@@ -74,7 +87,7 @@ export function createComment(
     }
   }
 
-  return db
+  const comment = db
     .insert(comments)
     .values({
       userId,
@@ -85,6 +98,51 @@ export function createComment(
     })
     .returning()
     .get();
+
+  if (parentId === null) {
+    const sender = getUser(db, userId);
+    const instructor = getUser(db, course.instructorId);
+    await sendNotification(notifications, {
+      kind: "discussion_question",
+      recipients: [toNotificationUser(instructor)],
+      sender: toNotificationUser(sender),
+      data: discussionData(course, comment),
+      idempotencyKey: `discussion-question:${comment.id}`,
+    });
+  }
+
+  return comment;
+}
+
+function getUser(db: Db, userId: number) {
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!user) {
+    throw new Error("User not found");
+  }
+  return user;
+}
+
+const SNIPPET_LENGTH = 140;
+
+/** The comment's text as posted, on one line and cut to a feed-row length. */
+function toSnippet(body: string) {
+  const oneLine = body.replace(/\s+/g, " ");
+  return oneLine.length > SNIPPET_LENGTH
+    ? `${oneLine.slice(0, SNIPPET_LENGTH - 1).trimEnd()}…`
+    : oneLine;
+}
+
+function discussionData(
+  course: { courseTitle: string; courseSlug: string; lessonTitle: string },
+  comment: { id: number; lessonId: number; body: string }
+): DiscussionNotificationData {
+  return {
+    commentId: comment.id,
+    courseTitle: course.courseTitle,
+    lessonTitle: course.lessonTitle,
+    snippet: toSnippet(comment.body),
+    url: `/courses/${course.courseSlug}/lessons/${comment.lessonId}#comment-${comment.id}`,
+  };
 }
 
 /**
@@ -92,12 +150,13 @@ export function createComment(
  * comments; staff (the course's Instructor or a Platform Admin) may delete
  * anyone's. Deleting an already-deleted comment is a no-op that returns it.
  */
-export function deleteComment(
+export async function deleteComment(
   db: Db,
   commentId: number,
   userId: number,
   isStaff: boolean,
-  now: Date
+  now: Date,
+  notifications: Notifications
 ) {
   const existing = getCommentById(db, commentId);
   if (!existing) {
