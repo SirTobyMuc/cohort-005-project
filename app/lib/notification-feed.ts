@@ -65,6 +65,21 @@ export function emptyNotificationFeed(): NotificationFeed {
   };
 }
 
+// ─── Loaded rows ───
+// The adapter only reports counts, so the feed UI updates the rows it has
+// loaded itself, optimistically, when it marks them read or seen.
+
+/** Marks the given loaded rows read at `at`; rows already read keep their time. */
+export function markLoadedRead(
+  notifications: FeedNotification[],
+  ids: string[],
+  at: string
+): FeedNotification[] {
+  return notifications.map((n) =>
+    ids.includes(n.id) && n.readAt === null ? { ...n, readAt: at } : n
+  );
+}
+
 // ─── Row text ───
 // Cadence writes each row from the Notification's data, not Knock templates.
 
