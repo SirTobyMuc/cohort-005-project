@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   describeNotification,
+  markLoadedRead,
+  markLoadedSeen,
   type FeedNotification,
 } from "./notification-feed";
 
@@ -188,5 +190,64 @@ describe("describeNotification", () => {
       title: "Ana Buyer enrolled on Test Course",
       snippet: "A new Student on your course.",
     });
+  });
+});
+
+describe("marking loaded Notifications", () => {
+  const at = "2026-11-15T12:00:00.000Z";
+  const earlier = "2026-11-15T11:00:00.000Z";
+
+  function question(
+    id: string,
+    status: { readAt?: string | null; seenAt?: string | null } = {}
+  ): FeedNotification {
+    return {
+      ...received,
+      id,
+      readAt: status.readAt ?? null,
+      seenAt: status.seenAt ?? null,
+      sender: ana,
+      kind: "discussion_question",
+      data: {
+        commentId: 12,
+        courseTitle: "Test Course",
+        lessonTitle: "Narrowing",
+        snippet: "Why?",
+        url: "/courses/test-course/lessons/3#comment-12",
+      },
+    };
+  }
+
+  it("marks only the given rows read", () => {
+    const rows = [question("a"), question("b")];
+
+    const marked = markLoadedRead(rows, ["b"], at);
+
+    expect(marked.map((n) => [n.id, n.readAt])).toEqual([
+      ["a", null],
+      ["b", at],
+    ]);
+  });
+
+  it("marks every loaded row read, keeping when earlier ones were read", () => {
+    const rows = [question("msg_1"), question("msg_2", { readAt: earlier })];
+
+    const marked = markLoadedRead(rows, "all", at);
+
+    expect(marked.map((n) => [n.id, n.readAt])).toEqual([
+      ["msg_1", at],
+      ["msg_2", earlier],
+    ]);
+  });
+
+  it("marks every loaded row seen and leaves them unread", () => {
+    const rows = [question("msg_1"), question("msg_2", { seenAt: earlier })];
+
+    const marked = markLoadedSeen(rows, at);
+
+    expect(marked.map((n) => [n.id, n.seenAt, n.readAt])).toEqual([
+      ["msg_1", at, null],
+      ["msg_2", earlier, null],
+    ]);
   });
 });
