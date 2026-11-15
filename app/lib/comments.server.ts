@@ -4,7 +4,9 @@ import * as schema from "~/db/schema";
 import { comments, courses, lessons, modules, users } from "~/db/schema";
 import { MIN_COMMENT_LENGTH, MAX_COMMENT_LENGTH } from "~/lib/comments";
 import {
+  archiveNotifications,
   sendNotification,
+  type NotificationArchive,
   toNotificationUser,
   type DiscussionNotificationData,
   type Notifications,
@@ -162,6 +164,9 @@ function discussionData(
  * Soft-deletes a comment by setting `deletedAt`. Authors may delete their own
  * comments; staff (the course's Instructor or a Platform Admin) may delete
  * anyone's. Deleting an already-deleted comment is a no-op that returns it.
+ *
+ * Archives the Notifications this comment caused, so they leave their
+ * recipients' feeds. Deleting a question leaves its Replies' Notifications.
  */
 export async function deleteComment(
   db: Db,
@@ -169,7 +174,7 @@ export async function deleteComment(
   userId: number,
   isStaff: boolean,
   now: Date,
-  notifications: Notifications
+  notifications: NotificationArchive
 ) {
   const existing = getCommentById(db, commentId);
   if (!existing) {
@@ -182,10 +187,14 @@ export async function deleteComment(
     return existing;
   }
 
-  return db
+  const deleted = db
     .update(comments)
     .set({ deletedAt: now.toISOString() })
     .where(eq(comments.id, commentId))
     .returning()
     .get();
+
+  await archiveNotifications(notifications, { commentId });
+
+  return deleted;
 }

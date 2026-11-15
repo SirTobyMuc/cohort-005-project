@@ -111,6 +111,19 @@ export interface Notifications {
   trigger(notification: NotificationTrigger): Promise<void>;
 }
 
+/** The domain event that caused Notifications, for archiving them all. */
+export type NotificationCause = { commentId: number };
+
+/**
+ * Takes Notifications back out of their recipients' feeds once what caused
+ * them is gone. Separate from `Notifications` so trigger-only adapters still
+ * fit where only triggering is needed.
+ */
+export interface NotificationArchive {
+  /** Archives every Notification whose `data` matches the cause. */
+  archive(cause: NotificationCause): Promise<void>;
+}
+
 export function toNotificationUser(user: {
   id: number;
   name: string;
@@ -143,6 +156,21 @@ export async function sendNotification(
   }
 }
 
+/** Archives a cause's Notifications, best-effort like `sendNotification`. */
+export async function archiveNotifications(
+  archive: NotificationArchive,
+  cause: NotificationCause
+): Promise<void> {
+  try {
+    await archive.archive(cause);
+  } catch (error) {
+    console.error(
+      `Archiving Notifications for ${JSON.stringify(cause)} failed:`,
+      error
+    );
+  }
+}
+
 // ─── Adapters ───
 
 // Only this adapter knows Knock's keys. Each Notification is one workflow,
@@ -166,9 +194,30 @@ function toKnockUser(user: NotificationUser) {
   };
 }
 
-export function knockNotifications(secretApiKey: string): Notifications {
+// Knock's batch endpoints take at most 50 message ids.
+const KNOCK_BATCH_SIZE = 50;
+
+export function knockNotifications(
+  secretApiKey: string
+): Notifications & NotificationArchive {
   const knock = new Knock({ apiKey: secretApiKey });
   return {
+    // Every Notification's trigger data carries its cause (e.g. `commentId`),
+    // so List Messages' `trigger_data` filter finds what to archive. No
+    // mapping of causes to message ids is kept on our side.
+    async archive(cause) {
+      const messageIds: string[] = [];
+      for await (const message of knock.messages.list({
+        trigger_data: JSON.stringify(cause),
+      })) {
+        if (!message.archived_at) messageIds.push(message.id);
+      }
+      for (let i = 0; i < messageIds.length; i += KNOCK_BATCH_SIZE) {
+        await knock.messages.batch.archive({
+          message_ids: messageIds.slice(i, i + KNOCK_BATCH_SIZE),
+        });
+      }
+    },
     async trigger(notification) {
       const workflowKey = KNOCK_WORKFLOW_KEYS[notification.kind];
       await knock.workflows.trigger(
@@ -187,8 +236,13 @@ export function knockNotifications(secretApiKey: string): Notifications {
 }
 
 /** Logs instead of sending, for running without Knock (local dev, CI). */
-export function noopNotifications(): Notifications {
+export function noopNotifications(): Notifications & NotificationArchive {
   return {
+    async archive(cause) {
+      console.info(
+        `[notifications] archive ${JSON.stringify(cause)} not sent: no KNOCK_SECRET_API_KEY`
+      );
+    },
     async trigger(notification) {
       console.info(
         `[notifications] ${notification.kind} to ${notification.recipients
@@ -214,20 +268,37 @@ function readKnockEnv(): KnockEnv {
 /** Knock when a secret key is set, otherwise the no-op adapter. */
 export function defaultNotifications(
   env: KnockEnv = readKnockEnv()
-): Notifications {
+): Notifications & NotificationArchive {
   const secretApiKey = env.KNOCK_SECRET_API_KEY;
   return secretApiKey ? knockNotifications(secretApiKey) : noopNotifications();
 }
 
-/** Records every trigger, for tests to check what was sent. */
-export function fakeNotifications(): Notifications & {
-  triggers: NotificationTrigger[];
-} {
+/**
+ * Records every trigger, for tests to check what was sent. `archive` matches
+ * on trigger data like Knock's `trigger_data` filter, moving what it hits
+ * into `archived`.
+ */
+export function fakeNotifications(): Notifications &
+  NotificationArchive & {
+    triggers: NotificationTrigger[];
+    archived: NotificationTrigger[];
+  } {
   const triggers: NotificationTrigger[] = [];
+  const archived: NotificationTrigger[] = [];
   return {
     triggers,
+    archived,
     async trigger(notification) {
       triggers.push(notification);
+    },
+    async archive(cause) {
+      const matches = (t: NotificationTrigger) =>
+        Object.entries(cause).every(
+          ([key, value]) => (t.data as Record<string, unknown>)[key] === value
+        );
+      archived.push(
+        ...triggers.filter((t) => matches(t) && !archived.includes(t))
+      );
     },
   };
 }

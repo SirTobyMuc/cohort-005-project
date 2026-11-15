@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { fakeNotifications } from "~/lib/notifications.server";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -443,6 +443,130 @@ describe("Discussion Notifications", () => {
     const [{ data }] = notifications.triggers;
     expect(data).toMatchObject({
       snippet: `${"word ".repeat(27)}word…`,
+    });
+  });
+
+  describe("on soft-delete", () => {
+    const LATER = new Date(2026, 9, 7, 9, 0, 0);
+
+    it("archives the Notifications a deleted Reply caused", async () => {
+      const question = await createComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Q?",
+        NOW,
+        notifications
+      );
+      const reply = await createComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        question.id,
+        "A",
+        NOW,
+        notifications
+      );
+
+      await deleteComment(
+        db,
+        reply.id,
+        base.instructor.id,
+        true,
+        LATER,
+        notifications
+      );
+
+      expect(
+        notifications.archived.map((t) => t.idempotencyKey)
+      ).toEqual([`discussion-reply:${reply.id}`]);
+    });
+
+    it("archives a deleted question's Notification but not its Replies'", async () => {
+      const question = await createComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Q?",
+        NOW,
+        notifications
+      );
+      await createComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        question.id,
+        "A",
+        NOW,
+        notifications
+      );
+
+      await deleteComment(
+        db,
+        question.id,
+        base.user.id,
+        false,
+        LATER,
+        notifications
+      );
+
+      expect(
+        notifications.archived.map((t) => t.idempotencyKey)
+      ).toEqual([`discussion-question:${question.id}`]);
+    });
+  });
+
+  describe("when Notifications fail", () => {
+    const broken = {
+      async trigger() {
+        throw new Error("Knock is down");
+      },
+      async archive() {
+        throw new Error("Knock is down");
+      },
+    };
+
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("still posts and deletes comments", async () => {
+      const question = await createComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Q?",
+        NOW,
+        broken
+      );
+      const reply = await createComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        question.id,
+        "A",
+        NOW,
+        broken
+      );
+      const deleted = await deleteComment(
+        db,
+        question.id,
+        base.user.id,
+        false,
+        NOW,
+        broken
+      );
+
+      expect(reply.parentId).toBe(question.id);
+      expect(deleted.deletedAt).toBe(NOW.toISOString());
+      expect(console.error).toHaveBeenCalledTimes(3);
     });
   });
 });
