@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   describeNotification,
   markLoadedRead,
+  markLoadedSeen,
   type FeedNotification,
 } from "./notification-feed";
 
@@ -173,6 +174,28 @@ describe("marking loaded Notifications", () => {
     expect(marked.map((n) => [n.id, n.readAt])).toEqual([
       ["a", null],
       ["b", at],
+    ]);
+  });
+
+  it("marks every loaded row read, keeping when earlier ones were read", () => {
+    const rows = [question("msg_1"), question("msg_2", { readAt: earlier })];
+
+    const marked = markLoadedRead(rows, "all", at);
+
+    expect(marked.map((n) => [n.id, n.readAt])).toEqual([
+      ["msg_1", at],
+      ["msg_2", earlier],
+    ]);
+  });
+
+  it("marks every loaded row seen and leaves them unread", () => {
+    const rows = [question("msg_1"), question("msg_2", { seenAt: earlier })];
+
+    const marked = markLoadedSeen(rows, at);
+
+    expect(marked.map((n) => [n.id, n.seenAt, n.readAt])).toEqual([
+      ["msg_1", at, null],
+      ["msg_2", earlier, null],
     ]);
   });
 });

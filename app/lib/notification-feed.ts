@@ -72,11 +72,22 @@ export function emptyNotificationFeed(): NotificationFeed {
 /** Marks the given loaded rows read at `at`; rows already read keep their time. */
 export function markLoadedRead(
   notifications: FeedNotification[],
-  ids: string[],
+  ids: string[] | "all",
+  at: string
+): FeedNotification[] {
+  const marks = (id: string) => ids === "all" || ids.includes(id);
+  return notifications.map((n) =>
+    marks(n.id) && n.readAt === null ? { ...n, readAt: at } : n
+  );
+}
+
+/** Marks every loaded row seen at `at`. Seen never changes read. */
+export function markLoadedSeen(
+  notifications: FeedNotification[],
   at: string
 ): FeedNotification[] {
   return notifications.map((n) =>
-    ids.includes(n.id) && n.readAt === null ? { ...n, readAt: at } : n
+    n.seenAt === null ? { ...n, seenAt: at } : n
   );
 }
 
