@@ -616,6 +616,9 @@ export function listTeamLicences(db: Queryable, buyerId: number, now: Date) {
 
 export type DecisionResult = { ok: true; email: Email } | Failure;
 
+/** What a decision's transaction hands back, to notify the buyer once it commits. */
+type Decided = { ok: true; email: Email; purchase: Purchase } | Failure;
+
 function findOpenRefundRequest(
   tx: Queryable,
   refundRequestId: number
@@ -665,7 +668,7 @@ export async function approveRefundRequest(
   now: Date,
   notifications: Notifications
 ): Promise<DecisionResult> {
-  return db.transaction((tx): DecisionResult => {
+  const decided = db.transaction((tx): Decided => {
     const found = findOpenRefundRequest(tx, refundRequestId);
     if (!found.ok) return found;
 
@@ -727,8 +730,48 @@ export async function approveRefundRequest(
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
+      purchase,
     };
   });
+
+  if (!decided.ok) return decided;
+
+  const found = getBuyerAndCourse(db, decided.purchase);
+  if (found) {
+    await sendNotification(notifications, {
+      kind: "refund_request_approved",
+      recipients: [toNotificationUser(found.buyer)],
+      sender: null,
+      data: {
+        refundRequestId,
+        purchaseId: decided.purchase.id,
+        purchasedAt: decided.purchase.createdAt,
+        courseTitle: found.course.title,
+        amount: decided.purchase.amountPaid,
+        decisionNote: note,
+        url: null,
+      },
+      idempotencyKey: `refund-approved:${refundRequestId}`,
+    });
+  }
+
+  return { ok: true, email: decided.email };
+}
+
+/** The buyer is whoever paid: the Team Admin, for a Team Licence. */
+function getBuyerAndCourse(db: Queryable, purchase: Purchase) {
+  const buyer = db
+    .select()
+    .from(users)
+    .where(eq(users.id, purchase.userId))
+    .get();
+  const course = db
+    .select()
+    .from(courses)
+    .where(eq(courses.id, purchase.courseId))
+    .get();
+
+  return buyer && course ? { buyer, course } : null;
 }
 
 /**

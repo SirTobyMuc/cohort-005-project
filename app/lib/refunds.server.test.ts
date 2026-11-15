@@ -590,4 +590,69 @@ describe("Refund Request Notifications", () => {
       },
     ]);
   });
+
+  it("tells the buyer their Refund Request was approved", async () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = await raise(purchase.id, base.user.id);
+
+    await approveRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      "Sorry it wasn't for you.",
+      NOW,
+      notifications
+    );
+
+    expect(sent("refund_request_approved")).toEqual([
+      {
+        kind: "refund_request_approved",
+        recipients: [
+          {
+            id: base.user.id,
+            name: "Test User",
+            email: "test@example.com",
+            avatar: null,
+          },
+        ],
+        sender: null,
+        data: {
+          refundRequestId: id,
+          purchaseId: purchase.id,
+          purchasedAt: purchase.createdAt,
+          courseTitle: "Test Course",
+          amount: 7900,
+          decisionNote: "Sorry it wasn't for you.",
+          url: null,
+        },
+        idempotencyKey: `refund-approved:${id}`,
+      },
+    ]);
+  });
+
+  it("tells the Team Admin their Team Licence refund was approved", async () => {
+    const priya = addLearner("Priya");
+    const { purchase } = buySeats(priya.id, 2);
+    const id = await raise(purchase.id, priya.id);
+
+    await approveRefundRequest(db, id, platformAdmin.id, null, NOW, notifications);
+
+    expect(sent("refund_request_approved")).toMatchObject([
+      {
+        recipients: [{ id: priya.id, name: "Priya" }],
+        data: { purchaseId: purchase.id, amount: 15800, decisionNote: null },
+      },
+    ]);
+  });
+
+  it("sends nothing when an approval is refused", async () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 2);
+    const id = await raise(purchase.id, priya.id);
+    claimSeat(seats[0].id, addLearner("Ben").id);
+
+    await approveRefundRequest(db, id, platformAdmin.id, null, NOW, notifications);
+
+    expect(sent("refund_request_approved")).toEqual([]);
+  });
 });

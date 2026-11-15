@@ -45,6 +45,19 @@ export type Notification =
         reason: string;
         url: string;
       };
+    }
+  // 1: to the buyer, when a Platform Admin approves their Refund Request.
+  | {
+      kind: "refund_request_approved";
+      data: {
+        refundRequestId: number;
+        purchaseId: number;
+        purchasedAt: string;
+        courseTitle: string;
+        amount: number;
+        decisionNote: string | null;
+        url: null;
+      };
     };
 
 export type NotificationKind = Notification["kind"];
@@ -101,6 +114,7 @@ export async function sendNotification(
 const KNOCK_WORKFLOW_KEYS: Record<NotificationKind, string> = {
   refund_request_confirmation: "refund-request-confirmation",
   open_refund_request: "open-refund-request",
+  refund_request_approved: "refund-request-approved",
 };
 
 function toKnockUser(user: NotificationUser) {
