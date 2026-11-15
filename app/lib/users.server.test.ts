@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestDb } from "~/test/setup";
 import { fakeNotifications } from "./notifications.server";
-import { signUp, updateProfile } from "./users.server";
+import { adminUpdateUser, signUp, updateProfile } from "./users.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -98,5 +98,74 @@ describe("updateProfile", () => {
 
     expect(updated.bio).toBe("New bio");
     expect(notifications.syncs).toHaveLength(1);
+  });
+});
+
+describe("adminUpdateUser", () => {
+  it("syncs the edited name and email", async () => {
+    const { user } = await signUp(
+      db,
+      { name: "Ana", email: "ana@example.com" },
+      notifications
+    );
+
+    await adminUpdateUser(
+      db,
+      user.id,
+      { name: "Ana Lima", email: "ana.lima@example.com" },
+      notifications
+    );
+
+    expect(notifications.syncs.at(-1)).toEqual({
+      id: user.id,
+      name: "Ana Lima",
+      email: "ana.lima@example.com",
+      avatar: null,
+    });
+    expect(await notifications.getPreferences(user.id)).toEqual(DEFAULTS);
+  });
+});
+
+describe("when the Notifications vendor is down", () => {
+  const broken = {
+    ...fakeNotifications(),
+    async syncUser() {
+      throw new Error("Knock is down");
+    },
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("still signs up, saves the profile and saves the admin edit", async () => {
+    const { user, created } = await signUp(
+      db,
+      { name: "Ana", email: "ana@example.com" },
+      broken
+    );
+    expect(created).toBe(true);
+
+    const saved = await updateProfile(
+      db,
+      user.id,
+      { name: "Ana Lima", bio: null },
+      broken
+    );
+    expect(saved.name).toBe("Ana Lima");
+
+    const edited = await adminUpdateUser(
+      db,
+      user.id,
+      { name: "Ana L.", email: "ana.l@example.com" },
+      broken
+    );
+    expect(edited).toMatchObject({ name: "Ana L.", email: "ana.l@example.com" });
+
+    expect(console.error).toHaveBeenCalledTimes(3);
   });
 });

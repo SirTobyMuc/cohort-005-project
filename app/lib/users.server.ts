@@ -64,6 +64,24 @@ export async function updateProfile(
   return user;
 }
 
+/** A Platform Admin edits a user's name and email. Always synced. */
+export async function adminUpdateUser(
+  db: Db,
+  userId: number,
+  input: { name: string; email: string },
+  notifications: Notifications
+): Promise<User> {
+  getUser(db, userId);
+  const user = db
+    .update(users)
+    .set({ name: input.name, email: input.email })
+    .where(eq(users.id, userId))
+    .returning()
+    .get();
+  await syncNotificationUser(notifications, toNotificationUser(user));
+  return user;
+}
+
 function getUser(db: Db, userId: number): User {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) throw new Error("User not found.");
