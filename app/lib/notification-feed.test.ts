@@ -99,4 +99,42 @@ describe("describeNotification", () => {
       snippet: "Test Course: “Over the Watch Limit.” You can ask again.",
     });
   });
+
+  const discussion = {
+    commentId: 12,
+    courseTitle: "Test Course",
+    lessonTitle: "Narrowing",
+    snippet: "Why doesn't `in` narrow here?",
+    url: "/courses/test-course/lessons/3#comment-12",
+  };
+
+  it("tells an Instructor who asked a Discussion Question on which lesson", () => {
+    const notification: FeedNotification = {
+      ...received,
+      sender: ana,
+      kind: "discussion_question",
+      data: discussion,
+    };
+
+    expect(describeNotification(notification)).toEqual({
+      category: "discussion",
+      title: "Ana Buyer asked a question on Narrowing",
+      snippet: "“Why doesn't `in` narrow here?”",
+    });
+  });
+
+  it("tells a question's author who replied to it", () => {
+    const notification: FeedNotification = {
+      ...received,
+      sender: ana,
+      kind: "discussion_reply",
+      data: discussion,
+    };
+
+    expect(describeNotification(notification)).toEqual({
+      category: "discussion",
+      title: "Ana Buyer replied to your question on Narrowing",
+      snippet: "“Why doesn't `in` narrow here?”",
+    });
+  });
 });

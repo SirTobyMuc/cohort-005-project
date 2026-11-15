@@ -120,6 +120,22 @@ export function describeNotification(
         snippet: `${courseTitle}: “${decisionNote}” You can ask again.`,
       };
     }
+    case "discussion_question": {
+      const { lessonTitle, snippet } = notification.data;
+      return {
+        category: "discussion",
+        title: `${senderName(notification)} asked a question on ${lessonTitle}`,
+        snippet: `“${snippet}”`,
+      };
+    }
+    case "discussion_reply": {
+      const { lessonTitle, snippet } = notification.data;
+      return {
+        category: "discussion",
+        title: `${senderName(notification)} replied to your question on ${lessonTitle}`,
+        snippet: `“${snippet}”`,
+      };
+    }
     // A kind added to the server port before it has row text here.
     default:
       return {

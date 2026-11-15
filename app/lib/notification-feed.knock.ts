@@ -22,6 +22,8 @@ const KINDS_BY_WORKFLOW_KEY: Partial<Record<string, NotificationKind>> = {
   "open-refund-request": "open_refund_request",
   "refund-request-approved": "refund_request_approved",
   "refund-request-declined": "refund_request_declined",
+  "discussion-question": "discussion_question",
+  "discussion-reply": "discussion_reply",
 };
 
 function toSender(actor: Recipient | undefined): FeedNotification["sender"] {
