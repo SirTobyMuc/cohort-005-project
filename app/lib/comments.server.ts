@@ -86,3 +86,34 @@ export function createComment(
     .returning()
     .get();
 }
+
+/**
+ * Soft-deletes a comment by setting `deletedAt`. Authors may delete their own
+ * comments; staff (the course's Instructor or a Platform Admin) may delete
+ * anyone's. Deleting an already-deleted comment is a no-op that returns it.
+ */
+export function deleteComment(
+  db: Db,
+  commentId: number,
+  userId: number,
+  isStaff: boolean,
+  now: Date
+) {
+  const existing = getCommentById(db, commentId);
+  if (!existing) {
+    throw new Error("Comment not found");
+  }
+  if (existing.userId !== userId && !isStaff) {
+    throw new Error("You can only delete your own comments");
+  }
+  if (existing.deletedAt !== null) {
+    return existing;
+  }
+
+  return db
+    .update(comments)
+    .set({ deletedAt: now.toISOString() })
+    .where(eq(comments.id, commentId))
+    .returning()
+    .get();
+}

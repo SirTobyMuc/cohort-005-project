@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
-import { createComment } from "./comments.server";
+import { createComment, deleteComment } from "./comments.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -109,5 +109,47 @@ describe("createComment", () => {
     expect(() =>
       createComment(db, base.user.id, lessonId, null, "x".repeat(5001), NOW)
     ).toThrow("Comment must be 5000 characters or fewer");
+  });
+});
+
+describe("deleteComment", () => {
+  const LATER = new Date(2026, 9, 7, 9, 0, 0);
+
+  it("soft-deletes the author's own comment, dated now", () => {
+    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
+
+    const deleted = deleteComment(db, question.id, base.user.id, false, LATER);
+
+    expect(deleted).toMatchObject({
+      id: question.id,
+      body: "Q?",
+      deletedAt: LATER.toISOString(),
+    });
+  });
+
+  it("refuses to delete someone else's comment unless the deleter is staff", () => {
+    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
+
+    expect(() =>
+      deleteComment(db, question.id, base.instructor.id, false, LATER)
+    ).toThrow("You can only delete your own comments");
+
+    const deleted = deleteComment(db, question.id, base.instructor.id, true, LATER);
+    expect(deleted.deletedAt).toBe(LATER.toISOString());
+  });
+
+  it("leaves an already-deleted comment as it was", () => {
+    const question = createComment(db, base.user.id, lessonId, null, "Q?", NOW);
+    deleteComment(db, question.id, base.user.id, false, NOW);
+
+    const again = deleteComment(db, question.id, base.user.id, false, LATER);
+
+    expect(again.deletedAt).toBe(NOW.toISOString());
+  });
+
+  it("refuses to delete a comment that doesn't exist", () => {
+    expect(() => deleteComment(db, 9999, base.user.id, true, LATER)).toThrow(
+      "Comment not found"
+    );
   });
 });
