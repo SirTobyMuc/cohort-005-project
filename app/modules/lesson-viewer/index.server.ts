@@ -40,8 +40,9 @@ export function createLessonViewer(db: Db) {
      */
     recordLessonVisit: (visit: Parameters<typeof recordLessonVisit>[1]) =>
       recordLessonVisit(db, visit),
-    markLessonComplete: (userId: number, lessonId: number) =>
-      markLessonComplete(db, userId, lessonId),
+    markLessonComplete: (
+      completion: Parameters<typeof markLessonComplete>[1]
+    ) => markLessonComplete(db, completion),
 
     getComment: (commentId: number) => getCommentById(db, commentId),
     /** The lesson's discussion, with every body rendered to safe HTML. */

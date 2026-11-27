@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { LessonProgressStatus } from "~/db/schema";
 import { addStudent, setUpCourse, watch } from "./fixtures";
 
+const NOW = new Date("2026-11-01T10:00:00.000Z");
+
 function visit(
   fixture: ReturnType<typeof setUpCourse>,
   userId: number,
@@ -31,7 +33,11 @@ describe("visiting a lesson", () => {
     const fixture = setUpCourse();
     const student = fixture.base.user.id;
     visit(fixture, student, 1);
-    fixture.viewer.markLessonComplete(student, fixture.lessons[1].id);
+    fixture.viewer.markLessonComplete({
+      userId: student,
+      lessonId: fixture.lessons[1].id,
+      now: NOW,
+    });
 
     expect(visit(fixture, student, 1).lessonStatus).toBe(
       LessonProgressStatus.Completed
@@ -42,7 +48,11 @@ describe("visiting a lesson", () => {
     const fixture = setUpCourse();
     const student = fixture.base.user.id;
     const other = addStudent(fixture.db, "Other").id;
-    fixture.viewer.markLessonComplete(student, fixture.lessons[0].id);
+    fixture.viewer.markLessonComplete({
+      userId: student,
+      lessonId: fixture.lessons[0].id,
+      now: NOW,
+    });
     visit(fixture, other, 2);
 
     expect(visit(fixture, student, 1).lessonProgressMap).toEqual({
@@ -55,13 +65,14 @@ describe("visiting a lesson", () => {
     const fixture = setUpCourse();
     const student = fixture.base.user.id;
 
-    const row = fixture.viewer.markLessonComplete(
-      student,
-      fixture.lessons[2].id
-    );
+    const row = fixture.viewer.markLessonComplete({
+      userId: student,
+      lessonId: fixture.lessons[2].id,
+      now: NOW,
+    });
 
     expect(row.status).toBe(LessonProgressStatus.Completed);
-    expect(row.completedAt).not.toBeNull();
+    expect(row.completedAt).toBe(NOW.toISOString());
   });
 });
 
