@@ -110,7 +110,8 @@ describe("submitting a quiz", () => {
         selectedAnswers: answers,
       });
     submit({ [trueFalse.id]: trueFalse.optionIds[0] });
-    submit({});
+
+    expect(submit({})).toMatchObject({ score: 0, passed: false });
 
     expect(
       viewer.getLessonQuiz(lessons[0].id, base.user.id).bestAttempt

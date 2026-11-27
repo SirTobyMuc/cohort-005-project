@@ -36,7 +36,6 @@ export function getQuizWithQuestions(db: Db, quizId: number) {
 }
 
 function listOptions(db: Db, questionIds: number[]) {
-  if (questionIds.length === 0) return [];
   return db
     .select()
     .from(quizOptions)
