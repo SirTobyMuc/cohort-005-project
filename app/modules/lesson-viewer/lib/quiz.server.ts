@@ -173,6 +173,9 @@ export function computeResult(
   }
 }
 
+/** The scored outcome of one quiz attempt. */
+export type QuizResult = NonNullable<ReturnType<typeof computeResult>>;
+
 export function getQuizById(db: Db, quizId: number) {
   return db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
 }

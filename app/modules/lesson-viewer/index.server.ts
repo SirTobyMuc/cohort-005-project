@@ -16,7 +16,7 @@ import {
 } from "./lib/thread.server";
 import { computeResult, getLessonQuiz, getQuizById } from "./lib/quiz.server";
 
-export type { LessonQuiz } from "./lib/quiz.server";
+export type { LessonQuiz, QuizResult } from "./lib/quiz.server";
 
 /**
  * The data behind a Student's lesson page: the course outline, their
