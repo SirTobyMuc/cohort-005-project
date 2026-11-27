@@ -1,4 +1,4 @@
-import type { Db } from "~/lib/notes.server";
+import type { Db } from "./db.server";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import {
   LessonProgressStatus,

@@ -1,5 +1,5 @@
 import { db as appDb } from "~/db";
-import type { Db } from "~/lib/notes.server";
+import type { Db } from "./lib/db.server";
 import {
   buildCurriculum,
   findAdjacentLessons,

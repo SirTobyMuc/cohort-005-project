@@ -1,4 +1,4 @@
-import type { Db } from "~/lib/notes.server";
+import type { Db } from "./db.server";
 import { asc, eq } from "drizzle-orm";
 import {
   UserRole,

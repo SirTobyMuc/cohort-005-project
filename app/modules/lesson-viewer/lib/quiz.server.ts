@@ -1,4 +1,4 @@
-import type { Db } from "~/lib/notes.server";
+import type { Db } from "./db.server";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   quizAnswers,
